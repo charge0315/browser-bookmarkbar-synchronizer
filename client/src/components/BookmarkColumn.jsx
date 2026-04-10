@@ -3,12 +3,12 @@ import {
   SortableContext, 
   verticalListSortingStrategy 
 } from '@dnd-kit/sortable';
-import { Chrome, Globe, Pocket, Chrome as EdgeIcon, Zap } from 'lucide-react';
+import { AppWindow, Monitor, Globe, Zap } from 'lucide-react';
 import { BookmarkItem } from './BookmarkItem';
 
 const BROWSER_ICONS = {
-  chrome: <Chrome size={20} color="#ea4335" />,
-  edge: <EdgeIcon size={20} color="#0078d7" />,
+  chrome: <AppWindow size={20} color="#ea4335" />,
+  edge: <Monitor size={20} color="#0078d7" />,
   brave: <Zap size={20} color="#ff1b2d" />
 };
 

@@ -18,7 +18,8 @@ import {
   Type, 
   ListOrdered, 
   RefreshCw,
-  AlertTriangle 
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
 import { useBookmarks } from './hooks/useBookmarks';
 import { BookmarkColumn } from './components/BookmarkColumn';
@@ -28,16 +29,24 @@ function App() {
   const { 
     bookmarks, 
     setBookmarks, 
+    previewState,
+    setPreviewState,
     fetchBookmarks, 
     saveAll, 
     mergeBookmarks, 
     organizeBookmarks, 
     summarizeBookmarks,
+    aiOrganizeAll,
+    applyPreviewAndSaveAll,
+    rollbackAll,
     loading,
     error
   } = useBookmarks();
 
   const [activeId, setActiveId] = useState(null);
+
+  const targetState = previewState || bookmarks;
+  const setTargetState = previewState ? setPreviewState : setBookmarks;
 
   useEffect(() => {
     fetchBookmarks();
@@ -55,9 +64,9 @@ function App() {
   };
 
   const findContainer = (id) => {
-    for (const browser of Object.keys(bookmarks)) {
-      if (bookmarks[browser]?.roots?.bookmark_bar?.children.some(c => c.id === id)) {
-        return browser;
+    for (const key of Object.keys(targetState)) {
+      if (targetState[key]?.roots?.bookmark_bar?.children.some(c => c.id === id)) {
+        return key;
       }
     }
     return null;
@@ -69,20 +78,47 @@ function App() {
     const { id: overId } = over || {};
 
     const activeContainer = findContainer(activeId);
-    const overContainer = overId ? (overId in bookmarks ? overId : findContainer(overId)) : null;
+    const overContainer = overId ? (overId in targetState ? overId : findContainer(overId)) : null;
 
     if (!activeContainer || !overContainer || activeContainer !== overContainer) {
+      // NOTE: Because activeContainer !== overContainer block is here, dragging between different columns actually gets ignored in this implementation.
+      // But since we want users to drag across categories, we MUST support cross-container drag.
+      if (activeContainer && overContainer && activeContainer !== overContainer) {
+        // Cross-container drag logic
+        const sourceChildren = [...targetState[activeContainer].roots.bookmark_bar.children];
+        const destChildren = [...targetState[overContainer].roots.bookmark_bar.children];
+        const activeIndex = sourceChildren.findIndex(c => c.id === activeId);
+        
+        const [movedItem] = sourceChildren.splice(activeIndex, 1);
+        
+        let overIndex = destChildren.findIndex(c => c.id === overId);
+        if (overIndex === -1) overIndex = destChildren.length;
+        
+        destChildren.splice(overIndex, 0, movedItem);
+
+        setTargetState(prev => ({
+          ...prev,
+          [activeContainer]: {
+            ...prev[activeContainer],
+            roots: { ...prev[activeContainer].roots, bookmark_bar: { children: sourceChildren } }
+          },
+          [overContainer]: {
+            ...prev[overContainer],
+            roots: { ...prev[overContainer].roots, bookmark_bar: { children: destChildren } }
+          }
+        }));
+      }
       setActiveId(null);
       return; 
     }
 
     if (activeId !== overId) {
-      const children = bookmarks[activeContainer].roots.bookmark_bar.children;
+      const children = targetState[activeContainer].roots.bookmark_bar.children;
       const oldIndex = children.findIndex(c => c.id === activeId);
       const newIndex = children.findIndex(c => c.id === overId);
 
       const newChildren = arrayMove(children, oldIndex, newIndex);
-      setBookmarks(prev => ({
+      setTargetState(prev => ({
         ...prev,
         [activeContainer]: {
           ...prev[activeContainer],
@@ -106,30 +142,70 @@ function App() {
         <div className="header-title">
           <h1>Browser Bookmarkbar Synchronizer</h1>
           <p style={{ fontSize: '0.9rem', color: '#94a3b8' }}>
-            各ブラウザのブックマークバーを統合・整理します。
+            各ブラウザのブックマークバーをAIで全自動統合・整理します。
           </p>
         </div>
         <div className="controls">
-          <button className="btn-secondary" onClick={fetchBookmarks} disabled={loading}>
-            <RefreshCw size={18} className={loading ? 'spin' : ''} />
-            再読み込み
-          </button>
-          <button className="btn-secondary" onClick={mergeBookmarks}>
-            <GitMerge size={18} />
-            マージ
-          </button>
-          <button className="btn-secondary" onClick={() => summarizeBookmarks(true)}>
-            <Type size={18} />
-            要約
-          </button>
-          <button className="btn-secondary" onClick={organizeBookmarks}>
-            <ListOrdered size={18} />
-            整理
-          </button>
-          <button className="btn-primary" onClick={saveAll}>
-            <Save size={18} />
-            保存
-          </button>
+          {!previewState ? (
+            <>
+              <button 
+                className="btn-primary" 
+                onClick={() => aiOrganizeAll(false)} 
+                disabled={loading}
+                style={{ padding: '0.6rem 1.5rem', fontSize: '1.05rem', background: 'linear-gradient(135deg, #a855f7, #3b82f6)' }}
+              >
+                <RefreshCw size={20} className={loading ? 'spin' : ''} />
+                ✨ AI全自動整理
+              </button>
+              
+              <div style={{ width: '1px', background: 'rgba(255,255,255,0.2)', margin: '0 0.5rem' }}></div>
+              
+              <button className="btn-secondary" onClick={fetchBookmarks} disabled={loading}>
+                <RefreshCw size={18} className={loading ? 'spin' : ''} />
+                読込
+              </button>
+              <button className="btn-secondary" onClick={mergeBookmarks} disabled={loading}>
+                <GitMerge size={18} />
+                手動マージ
+              </button>
+              <button className="btn-secondary" onClick={rollbackAll} disabled={loading} style={{ color: '#eab308', borderColor: 'rgba(234, 179, 8, 0.5)' }}>
+                <RotateCcw size={18} />
+                元に戻す(Undo)
+              </button>
+              <button className="btn-primary" onClick={saveAll} disabled={loading} style={{ background: '#10b981' }}>
+                <Save size={18} />
+                保存
+              </button>
+            </>
+          ) : (
+            <>
+              <button 
+                className="btn-secondary" 
+                onClick={() => setPreviewState(null)} 
+                disabled={loading}
+              >
+                キャンセル
+              </button>
+              <button 
+                className="btn-primary" 
+                onClick={() => aiOrganizeAll(true)} 
+                disabled={loading}
+                style={{ padding: '0.6rem 1.5rem', fontSize: '1.05rem', background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}
+              >
+                <RefreshCw size={20} className={loading ? 'spin' : ''} />
+                🔄 別の観点で再分類
+              </button>
+              <button 
+                className="btn-primary" 
+                onClick={applyPreviewAndSaveAll} 
+                disabled={loading}
+                style={{ padding: '0.6rem 2rem', fontSize: '1.05rem', background: '#10b981' }}
+              >
+                <Save size={20} />
+                この内容で適用して保存
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -151,11 +227,11 @@ function App() {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            {Object.keys(bookmarks).map(browser => (
+            {Object.keys(targetState).map(browser => (
               <BookmarkColumn 
                 key={browser} 
                 browser={browser} 
-                data={bookmarks[browser]} 
+                data={targetState[browser]} 
                 onSummarize={summarizeBookmarks}
               />
             ))}
@@ -163,10 +239,10 @@ function App() {
         )}
       </main>
 
-      <footer style={{ marginTop: '2rem', padding: '1rem', background: 'rgba(234, 179, 8, 0.1)', borderRadius: '8px', border: '1px solid rgba(234, 179, 8, 0.2)' }}>
-        <p style={{ color: '#eab308', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      <footer style={{ marginTop: '2rem', padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+        <p style={{ color: '#ef4444', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <AlertTriangle size={16} />
-          <strong>重要:</strong> 「保存」実行前に、すべてのブラウザを終了させてください。起動中に保存すると、変更が反映されない場合があります。
+          <strong>警告:</strong> 「保存」を押下すると、現在開いているブラウザがすべて自動的に終了します。作業中のデータを保存してから実行してください。同期完了後、この画面（ローカルサーバー）が自動的に再起動します。
         </p>
       </footer>
     </div>

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ExternalLink, Hash, MoreHorizontal } from 'lucide-react';
+import { ExternalLink, Folder, Hash, MoreHorizontal } from 'lucide-react';
 
 export const BookmarkItem = ({ item, browser, onSummarize }) => {
   const {
@@ -17,16 +17,18 @@ export const BookmarkItem = ({ item, browser, onSummarize }) => {
     transition,
   };
 
+  const isFolder = item?.type === 'folder';
+
   return (
     <div 
       ref={setNodeRef} 
       style={style} 
       {...attributes} 
       {...listeners}
-      className="bookmark-item"
+      className={`bookmark-item ${isFolder ? 'folder-item' : ''}`}
     >
       <div className="bookmark-favicon">
-        {item?.type === 'url' ? (
+        {!isFolder && item?.url ? (
           <img 
             src={`https://www.google.com/s2/favicons?domain=${(() => {
               try {
@@ -40,12 +42,18 @@ export const BookmarkItem = ({ item, browser, onSummarize }) => {
             style={{ width: '16px', height: '16px' }}
           />
         ) : (
-          <Hash size={16} color="#94a3b8" />
+          <Folder size={16} color="#3b82f6" />
         )}
       </div>
       <div className="bookmark-info">
         <div className="bookmark-title" title={item?.name}>{item?.name}</div>
-        <div className="bookmark-url" title={item?.url}>{item?.url}</div>
+        {isFolder ? (
+          <div className="bookmark-url" style={{ color: '#3b82f6', fontWeight: 500 }}>
+            {item?.children ? `${item.children.length} items` : 'Empty'}
+          </div>
+        ) : (
+          <div className="bookmark-url" title={item?.url}>{item?.url}</div>
+        )}
       </div>
       <button 
         className="btn-icon" 
