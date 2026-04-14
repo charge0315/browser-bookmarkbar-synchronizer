@@ -25,25 +25,25 @@ Let AI clean, deduplicate, and categorize everything — instantly.
 
 ## ✨ Features
 
-- **🤖 AI Auto Organization**  
-  AI automatically cleans and categorizes bookmarks across Chrome, Edge, and Brave simultaneously.  
-  （複数のブラウザのブックマークを統合し、AIが全自動で重複削除・要約・絵文字付きカテゴリ分類を実行します）
+- **🤖 Multi-Perspective AI Organization**  
+  Select from multiple categorization styles (Standard, Functional, or Topic-based) to organize your bookmarks exactly how you like.  
+  （標準・目的別・分野別など、AIが提案する複数のパターンの分類案から好きなものを選択して適用できます）
 
 - **📂 Deep AI Categorization**  
   Smartly handles large folders (>20 items) by recursively creating sub-categories to keep your bookmark bar clean.  
   （20件以上のアイテムがある場合はAIがさらに小分類を自動生成し、階層構造で整理します）
 
-- **🧬 Cross-Browser Merge Engine**  
-  Intelligently merges bookmarks across browsers into one unified structure.  
-  （単なる同期ではなく、すべてのブラウザのブックマークを統合し「一番美しい構造」に再構築します）
+- **🧬 Integrity & Data Safety**  
+  Never lose a bookmark. Any items the AI fails to categorize are automatically placed in a `📦 未分類 (要確認)` folder.  
+  （AIが分類しきれなかったブックマークは「未分類」フォルダに自動救済。データの欠落を物理的に防ぎます）
 
-- **🔄 Magic Auto-Reboot & Sync**  
-  No manual file handling. The tool automatically closes browsers, applies changes, fixes crash dialogs, and restarts browsers.  
-  （保存時にブラウザを自動終了・上書き・再起動。強制終了時の「復元しますか」ダイアログも自動修復します）
+- **🤝 Unified Merge Engine**  
+  Extracts and deduplicates bookmarks from **all roots** (Bookmark Bar, Other Bookmarks, Synced Bookmarks).  
+  （全ての保存場所からブックマークを抽出し、重複を一本化して統合整理します）
 
-- **🖱️ Intuitive Drag & Drop**  
-  Easily manually adjust AI results across category column boards.  
-  （AIの整理結果をカテゴリごとに並べ、直感的にドラッグ＆ドロップで手動微調整が可能です）
+- **🔄 Enhanced Sync Reliability**  
+  Specifically handles Chromium sync metadata and checksums to prevent the browser from reverting your changes.  
+  （ブラウザの同期機能によって勝手に元に戻される問題に対処済み。メタデータとチェックサムを自動調整します）
 
 - **🔙 Integrated Rollback**  
   Made a mistake? Restore your previous bookmark state with a single click.  
@@ -66,6 +66,14 @@ This tool exists to fix that — automatically.
 - 🧠 **Minimal Context:** Only URLs and bookmark titles are sent to Gemini API.
 - ♻️ **Auto-Rollback Safe Write:** Before saving, a backup (`Bookmarks.bak_antigravity`) is created. If writing fails for any reason, it will automatically roll back to prevent data corruption.
 - 🛠️ **Preference Repair:** Automatically fixes browser Preferences files after sync to prevent "Restore Pages" crash dialogs.
+
+### 📁 Target Files (Current User Scope)
+
+This tool only affects the **currently logged-in Windows user**. It does not access or modify other users' data. The following files are targeted:
+
+- **Chrome:** `%LOCALAPPDATA%\Google\Chrome\User Data\Default\Bookmarks`
+- **Edge:** `%LOCALAPPDATA%\Microsoft\Edge\User Data\Default\Bookmarks`
+- **Brave:** `%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\Default\Bookmarks`
 
 
 > **⚠️ 重要な注意事項 / Warning**

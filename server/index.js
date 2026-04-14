@@ -112,13 +112,9 @@ app.post('/api/summarize', async (req, res) => {
 });
 
 app.post('/api/ai-organize', async (req, res) => {
-  const { items, alternative } = req.body;
-  if (!items || !Array.isArray(items)) {
-    return res.status(400).json({ error: 'Missing or invalid items array' });
-  }
-
   try {
-    const result = await organizeBookmarksList(items, alternative);
+    const { items, perspective } = req.body;
+    const result = await organizeBookmarksList(items, perspective || 'default');
     res.json(result);
   } catch (error) {
     console.error('AI Organize error:', error);

@@ -13,6 +13,8 @@ const API_BASE = 'http://localhost:3001/api';
  */
 export const useBookmarks = () => {
   const [bookmarks, setBookmarks] = useState({ chrome: null, edge: null, brave: null });
+  const [previewCandidates, setPreviewCandidates] = useState([]);
+  const [activeCandidateIndex, setActiveCandidateIndex] = useState(-1);
   const [previewState, setPreviewState] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -235,13 +237,15 @@ export const useBookmarks = () => {
    * 
    * @returns {Array<Object>} 重複排除されたURLリスト
    */
-  const extractUniqueBookmarkUrls = () => {
+   const extractUniqueBookmarkUrls = () => {
     const uniqueUrlsMap = new Map();
     const extractUrls = (children) => {
+      if (!children) return;
       children.forEach(item => {
         if (item.type === 'folder' && item.children) {
           extractUrls(item.children);
         } else if (item.type === 'url' && item.url) {
+          // 重複は一本化（最初に見つけたものを優先）
           if (!uniqueUrlsMap.has(item.url)) {
             uniqueUrlsMap.set(item.url, { name: item.name, url: item.url });
           }
@@ -249,17 +253,21 @@ export const useBookmarks = () => {
       });
     };
     
-    // 優先順位（Chrome > Edge > Brave）でパースします
+    // 全てのルート（バー、その他、同期済み）から抽出します
+    const rootsToExtract = ['bookmark_bar', 'other', 'synced'];
     const priorityOrder = ['chrome', 'edge', 'brave'];
-    priorityOrder.forEach(browserKey => {
-      if (bookmarks[browserKey]?.roots?.bookmark_bar?.children) {
-        extractUrls(bookmarks[browserKey].roots.bookmark_bar.children);
-      }
-    });
 
-    Object.keys(bookmarks).forEach(browserKey => {
-      if (!priorityOrder.includes(browserKey) && bookmarks[browserKey]?.roots?.bookmark_bar?.children) {
-        extractUrls(bookmarks[browserKey].roots.bookmark_bar.children);
+    // 優先順位に従ってブラウザごとに処理
+    const browsers = [...priorityOrder, ...Object.keys(bookmarks).filter(b => !priorityOrder.includes(b))];
+
+    browsers.forEach(browserKey => {
+      const browserData = bookmarks[browserKey];
+      if (browserData?.roots) {
+        rootsToExtract.forEach(rootKey => {
+          if (browserData.roots[rootKey]?.children) {
+            extractUrls(browserData.roots[rootKey].children);
+          }
+        });
       }
     });
 
@@ -317,67 +325,94 @@ export const useBookmarks = () => {
 
   /**
    * 全ブラウザのブックマークを抽出し、AIエンジンへ送信してプレビュー画面を構築します。
-   * 
-   * 意図: スマートな整理体験を提供するため、チャンク処理や階層化を統合して非同期実行します。
-   * 
-   * @param {boolean} alternative - 別観点での分類を要求するかどうか
+   * 複数の分類パターンを並列で生成し、ユーザーが選択できるようにします。
    */
-  const aiOrganizeAll = async (alternative = false) => {
+  const aiOrganizeAll = async () => {
     setLoading(true);
     setError(null);
+    setPreviewCandidates([]);
+    setActiveCandidateIndex(-1);
+
     try {
       const allUrls = extractUniqueBookmarkUrls();
       if (allUrls.length === 0) {
         throw new Error('整理できるブックマークがありません。');
       }
 
-      // サーバのAIエンジンによる分類処理をキックします
-      const response = await axios.post(`${API_BASE}/ai-organize`, { items: allUrls, alternative });
-      const organizedList = response.data;
+      const perspectives = [
+        { id: 'default', label: '標準的な分類', icon: '📦' },
+        { id: 'functional', label: '目的・役割別', icon: '🛠️' },
+        { id: 'topic', label: 'コンテンツ・分野別', icon: '🌐' }
+      ];
 
-      let idCounter = Date.now(); 
-      const categoryMap = {};
-
-      organizedList.forEach(item => {
-        const cat = item.category || '📦 その他';
-        if (!categoryMap[cat]) categoryMap[cat] = [];
-        categoryMap[cat].push({
-          id: String(idCounter++),
-          name: item.name,
-          url: item.url,
-          type: 'url'
+      const generatePattern = async (p) => {
+        const response = await axios.post(`${API_BASE}/ai-organize`, { 
+          items: allUrls, 
+          perspective: p.id 
         });
-      });
+        const organizedList = response.data;
 
-      // 限界数(20件)を超過している場合はサブカテゴリ化を実行します
-      await applySubCategorization(categoryMap, idCounter);
+        let idCounter = Date.now() + Math.random() * 1000;
+        const categoryMap = {};
 
-      const newTree = [];
-      Object.keys(categoryMap).sort().forEach(cat => {
-        newTree.push({
-          id: String(idCounter++),
-          name: cat,
-          type: 'folder',
-          children: categoryMap[cat] // 中身がフラットなURL群か、追加サブフォルダ群のどちらかが入っています
+        organizedList.forEach(item => {
+          const cat = item.category || '📦 その他';
+          if (!categoryMap[cat]) categoryMap[cat] = [];
+          categoryMap[cat].push({
+            id: String(idCounter++),
+            name: item.name,
+            url: item.url,
+            type: 'url'
+          });
         });
-      });
 
-      const newPreview = {};
-      newTree.forEach(folder => {
-        newPreview[folder.name] = {
-          roots: {
-            bookmark_bar: { children: folder.children || [] }
-          }
+        await applySubCategorization(categoryMap, idCounter);
+
+        const newTree = [];
+        Object.keys(categoryMap).sort().forEach(cat => {
+          newTree.push({
+            id: String(idCounter++),
+            name: cat,
+            type: 'folder',
+            children: categoryMap[cat]
+          });
+        });
+
+        const treeData = {};
+        newTree.forEach(folder => {
+          treeData[folder.name] = {
+            roots: {
+              bookmark_bar: { children: folder.children || [] }
+            }
+          };
+        });
+
+        return {
+          ...p,
+          data: treeData
         };
-      });
+      };
 
-      setPreviewState(newPreview);
+      // 並列で3パターン生成
+      const results = await Promise.all(perspectives.map(generatePattern));
+
+      setPreviewCandidates(results);
+      setActiveCandidateIndex(0);
+      setPreviewState(results[0].data);
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'AI処理中にエラーが発生しました。');
       console.error(err);
     } finally {
       setLoading(false);
     }
+  };
+
+  /**
+   * 選択された分類パターンを現在のプレビューとしてセットします。
+   */
+  const selectCandidate = (index) => {
+    setActiveCandidateIndex(index);
+    setPreviewState(previewCandidates[index].data);
   };
 
   /**
@@ -438,8 +473,9 @@ export const useBookmarks = () => {
   return {
     bookmarks,
     setBookmarks,
-    previewState,
-    setPreviewState,
+    previewCandidates,
+    activeCandidateIndex,
+    selectCandidate,
     loading,
     error,
     fetchBookmarks,

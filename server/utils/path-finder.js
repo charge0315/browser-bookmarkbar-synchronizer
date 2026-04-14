@@ -26,15 +26,58 @@ export const saveBookmarks = (browser, data) => {
 
   let backupCreated = false;
   const backupPath = `${filePath}.bak_antigravity`;
+  const browserBakPath = `${filePath}.bak`;
 
-  // Backup first
+  // 1. まず現在のバックアップをとる
   if (fs.existsSync(filePath)) {
     fs.copyFileSync(filePath, backupPath);
     backupCreated = true;
   }
 
+  // 2. ブラウザ自身のバックアップ（.bak）を削除
+  // 意図: ブラウザが不整合を検知して古いバックアップから復元するのを防ぐため
+  if (fs.existsSync(browserBakPath)) {
+    try {
+      fs.unlinkSync(browserBakPath);
+    } catch (e) {
+      console.warn(`Failed to delete browser backup for ${browser}:`, e);
+    }
+  }
+
   try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    // 3. データのクリーンアップ
+    // 意図: チェックサムを削除（ブラウザに再計算させる）し、
+    // 各ノードの同期用メタデータを削除して「新規ローカルデータ」として扱わせる
+    const cleanData = JSON.parse(JSON.stringify(data));
+    
+    // トップレベルのチェックサムを削除
+    if (cleanData.checksum) {
+      delete cleanData.checksum;
+    }
+
+    const stripSyncInfo = (node) => {
+      // 同期用IDやバージョン情報を削除
+      delete node.sync_transaction_version;
+      delete node.meta_info;
+      // GUIDを削除すると完全に新規扱いになるが、重複を避けるために一旦IDは残す。
+      // ただし、もし同期エンジンがGUIDを厳格に見ている場合は削除が必要。
+      // ここでは、再同期を促すために削除します。
+      delete node.guid;
+      
+      if (node.children) {
+        node.children.forEach(stripSyncInfo);
+      }
+    };
+
+    if (cleanData.roots) {
+      Object.keys(cleanData.roots).forEach(rootKey => {
+        if (cleanData.roots[rootKey].children) {
+          cleanData.roots[rootKey].children.forEach(stripSyncInfo);
+        }
+      });
+    }
+
+    fs.writeFileSync(filePath, JSON.stringify(cleanData, null, 2), 'utf8');
   } catch (error) {
     // Rollback if an error occurs during writing
     if (backupCreated) {

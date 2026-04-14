@@ -26,16 +26,21 @@ export const summarizeTitle = async (title) => {
   }
 };
 
-export const organizeBookmarksList = async (items, alternative = false) => {
+export const organizeBookmarksList = async (items, perspectiveType = "default") => {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error('GEMINI APIキーが設定されていません。.envファイルを確認してください。');
   }
 
-  const CHUNK_SIZE = 80; // バッチサイズ。大きすぎると出力トークン超過、小さすぎるとAPI制限に引っかかる
-  let perspective = "ブックマークを最適なカテゴリに分類してください。";
-  if (alternative) {
-    perspective = "先ほどとは全く異なる、よりユニークで斬新な観点（例：「読むべき重要度順」「タスク・行動ベース」「利用頻度」など）で再分類してください。";
-  }
+  const CHUNK_SIZE = 80;
+  
+  const PERSPECTIVES = {
+    "default": "ブックマークを最適なカテゴリに分類してください。",
+    "functional": "「買い物」「技術調査」「娯楽」といった、ユーザーの『行動・目的』ベースで機能的に分類してください。",
+    "topic": "ウェブサイトの『トピック・主題』に基づいて、専門的なカテゴリ（例：テクノロジー、経済、ライフスタイル）で分類してください。",
+    "alternative": "先ほどとは全く異なる、よりユニークで斬新な観点（例：「読むべき重要度順」「利用頻度」「エモーショナルな分類」など）で再分類してください。"
+  };
+
+  const perspective = PERSPECTIVES[perspectiveType] || PERSPECTIVES["default"];
 
   let allOrganized = [];
   let existingCategories = new Set(["📦 その他"]);
@@ -85,9 +90,30 @@ ${JSON.stringify(chunk)}`;
       }
     } catch (error) {
       console.error("Gemini Organize Error chunking at index " + i + ":", error);
-      throw new Error('AIによる整理中にエラーが発生しました（一部チャンク）: ' + error.message);
+      // 致命的なエラー（パース失敗など）の場合、このチャンクのアイテムを「未分類」として救済
+      const salvage = chunk.map(item => ({
+        category: "📦 未分類 (要確認)",
+        name: item.name,
+        url: item.url
+      }));
+      allOrganized = allOrganized.concat(salvage);
     }
   }
+
+  // 最終的な整合性チェック: 入力の全URLが結果に含まれているか確認
+  const inputUrls = new Set(items.map(it => it.url));
+  const outputUrls = new Set(allOrganized.map(it => it.url));
+
+  items.forEach(inputItem => {
+    if (!outputUrls.has(inputItem.url)) {
+      console.warn(`Item missing after AI organization, salvaging: ${inputItem.url}`);
+      allOrganized.push({
+        category: "📦 未分類 (要確認)",
+        name: inputItem.name,
+        url: inputItem.url
+      });
+    }
+  });
 
   return allOrganized;
 };

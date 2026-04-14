@@ -55,10 +55,14 @@ export const fixBrowserPreferences = () => {
     if (fs.existsSync(prefPath)) {
       try {
         const data = fs.readFileSync(prefPath, 'utf8');
-        // Chrome/Edge/Braveの Preferences はネストされた巨大なJSONで、場合によっては一行です。
-        // exit_type を "Crashed" から "Normal" へ置換し、さらに各種リカバリ状態をリセットします。
+        // 1. クラッシュ状態の解除
         let fixedData = data.replace(/"exit_type":"Crashed"/g, '"exit_type":"Normal"');
         fixedData = fixedData.replace(/"exit_state":"Crashed"/g, '"exit_state":"Normal"');
+        fixedData = fixedData.replace(/"exited_cleanly":false/g, '"exited_cleanly":true');
+        
+        // 2. 特殊なフラグの削除 (もしあれば)
+        // 意図: バックグラウンドでの強制終了に伴うエラー通知を最小限にします
+        fixedData = fixedData.replace(/"was_last_shutdown_clean":false/g, '"was_last_shutdown_clean":true');
         
         fs.writeFileSync(prefPath, fixedData, 'utf8');
       } catch (err) {

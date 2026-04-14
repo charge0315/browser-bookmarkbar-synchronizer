@@ -29,8 +29,9 @@ function App() {
   const { 
     bookmarks, 
     setBookmarks, 
-    previewState,
-    setPreviewState,
+    previewCandidates,
+    activeCandidateIndex,
+    selectCandidate,
     fetchBookmarks, 
     saveAll, 
     mergeBookmarks, 
@@ -42,6 +43,9 @@ function App() {
     loading,
     error
   } = useBookmarks();
+
+  const previewState = activeCandidateIndex >= 0 ? previewCandidates[activeCandidateIndex].data : null;
+  const setPreviewState = () => {}; // Dummy since we use selectCandidate now
 
   const [activeId, setActiveId] = useState(null);
 
@@ -181,19 +185,10 @@ function App() {
             <>
               <button 
                 className="btn-secondary" 
-                onClick={() => setPreviewState(null)} 
+                onClick={() => window.location.reload()} 
                 disabled={loading}
               >
                 キャンセル
-              </button>
-              <button 
-                className="btn-primary" 
-                onClick={() => aiOrganizeAll(true)} 
-                disabled={loading}
-                style={{ padding: '0.6rem 1.5rem', fontSize: '1.05rem', background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}
-              >
-                <RefreshCw size={20} className={loading ? 'spin' : ''} />
-                🔄 別の観点で再分類
               </button>
               <button 
                 className="btn-primary" 
@@ -208,6 +203,24 @@ function App() {
           )}
         </div>
       </header>
+
+      {previewCandidates.length > 0 && (
+        <div className="pattern-selector">
+          <h3>AI分類パターンを選択してください:</h3>
+          <div className="pattern-cards">
+            {previewCandidates.map((p, idx) => (
+              <div 
+                key={p.id} 
+                className={`pattern-card ${activeCandidateIndex === idx ? 'active' : ''}`}
+                onClick={() => selectCandidate(idx)}
+              >
+                <span className="pattern-icon">{p.icon}</span>
+                <span className="pattern-label">{p.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <main className="browser-grid">
         {error ? (
