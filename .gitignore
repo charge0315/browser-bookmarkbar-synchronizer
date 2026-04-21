@@ -105,3 +105,15 @@ dist
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Security Patterns
+.env
+*.env
+credentials.json
+*.pfx
+*.pem
+*.key
+*.p12
+node_modules/
+.venv/
+
