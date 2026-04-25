@@ -3,7 +3,8 @@ import cors from 'cors';
 import morgan from 'morgan';
 import { getBookmarks, saveBookmarks, rollbackBookmarks, BROWSER_PATHS } from './utils/path-finder.js';
 import { summarizeTitle, organizeBookmarksList, organizeSubCategories } from './utils/gemini.js';
-import { closeBrowsers, restartBrowsers, fixBrowserPreferences } from './utils/browser-manager.js';
+import { closeBrowsers, restartBrowsers, fixBrowserPreferences, updateBrowserSyncSettings } from './utils/browser-manager.js';
+import progressEmitter, { emitProgress } from './utils/event-emitter.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -11,6 +12,28 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(morgan('dev'));
+
+/**
+ * Server-Sent Events (SSE) エンドポイント
+ * 
+ * 意図: クライアントへAIの進捗状況などをリアルタイムにプッシュするためです。
+ */
+app.get('/api/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const onProgress = (data) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  progressEmitter.on('progress', onProgress);
+
+  req.on('close', () => {
+    progressEmitter.off('progress', onProgress);
+  });
+});
 
 app.get('/api/bookmarks', (req, res) => {
   try {
@@ -53,29 +76,44 @@ app.post('/api/save-all-reboot', async (req, res) => {
   }
 
   try {
-    // 意図: ブラウザが起動したままだとファイルロックがかかったり、
-    // 終了時にメモリ上の古いデータで上書きされたりするため、まず最初にブラウザを終了させます。
+    // 意図: ブラウザ起動中に同期が走って重複するのを防ぐため、
+    // 「同期OFFで起動して定着させる」→「同期ONに戻す」のダブル再起動シーケンスを行います。
+    emitProgress('保存シーケンスを開始します。ブラウザを終了中...', 'info');
     await closeBrowsers();
 
-    // 終了を確実にするための短い待機
     setTimeout(async () => {
-      // 1. ブックマーク情報の書き込み
+      // 1. 同期設定を一時的に無効化
+      emitProgress('同期重複防止のため、ブラウザの同期設定を一時的にOFFにします...', 'info');
+      updateBrowserSyncSettings(false);
+
+      // 2. ブックマーク情報の書き込み
+      emitProgress('新しいブックマーク構造を書き込み中...', 'info');
       Object.keys(bookmarksDict).forEach(browser => {
         saveBookmarks(browser, bookmarksDict[browser]);
       });
 
-      // 2. クラッシュダイアログ防止のためのPreferences修正
-      fixBrowserPreferences();
+      // 3. ブラウザを同期OFFの状態で一度起動（インポートを確定させる）
+      emitProgress('同期OFFの状態で一度ブラウザを起動し、データを確定させます...', 'info');
+      await restartBrowsers();
 
-      // 3. ブラウザをクリーンな状態で再起動
+      // 4. 数秒待機してから、同期をONに戻して最終起動
       setTimeout(async () => {
-        await restartBrowsers();
-      }, 500);
+        emitProgress('同期設定をONに戻すための最終処理中...', 'info');
+        await closeBrowsers();
+        
+        setTimeout(async () => {
+          updateBrowserSyncSettings(true);
+          emitProgress('完了！同期をONにしてブラウザを最終起動します。', 'success');
+          await restartBrowsers();
+        }, 1000);
+
+      }, 8000); // 8秒間、同期OFFの状態でインポートさせる
     }, 1000);
 
-    res.json({ message: 'Browsers closed, bookmarks updated, and rebooting...' });
+    res.json({ message: 'Double-restart sync protection sequence started...' });
   } catch (error) {
     console.error(`Error in save-all-reboot:`, error);
+    emitProgress('保存シーケンス中にエラーが発生しました。', 'error');
     res.status(500).json({ error: error.message });
   }
 });

@@ -41,10 +41,11 @@ export const restartBrowsers = async () => {
 };
 
 /**
- * 強制終了によって「正常に終了しませんでした」ダイアログが出るのを防ぐため、
- * Preferences ファイル内のクラッシュフラグを取り除きます。
+ * Preferences ファイル内の設定を JSON レベルで書き換えます。
+ * 
+ * @param {boolean} enableSync - 同期を有効にするか無効にするか
  */
-export const fixBrowserPreferences = () => {
+export const updateBrowserSyncSettings = (enableSync) => {
   const BROWSER_PREFS = [
     `${process.env.LOCALAPPDATA}\\Google\\Chrome\\User Data\\Default\\Preferences`,
     `${process.env.LOCALAPPDATA}\\Microsoft\\Edge\\User Data\\Default\\Preferences`,
@@ -55,19 +56,40 @@ export const fixBrowserPreferences = () => {
     if (fs.existsSync(prefPath)) {
       try {
         const data = fs.readFileSync(prefPath, 'utf8');
-        // 1. クラッシュ状態の解除
-        let fixedData = data.replace(/"exit_type":"Crashed"/g, '"exit_type":"Normal"');
-        fixedData = fixedData.replace(/"exit_state":"Crashed"/g, '"exit_state":"Normal"');
-        fixedData = fixedData.replace(/"exited_cleanly":false/g, '"exited_cleanly":true');
-        
-        // 2. 特殊なフラグの削除 (もしあれば)
-        // 意図: バックグラウンドでの強制終了に伴うエラー通知を最小限にします
-        fixedData = fixedData.replace(/"was_last_shutdown_clean":false/g, '"was_last_shutdown_clean":true');
-        
-        fs.writeFileSync(prefPath, fixedData, 'utf8');
+        const config = JSON.parse(data);
+
+        // 1. 同期設定の制御
+        // 意図: 再起動直後にクラウドから古いデータが降ってきて重複するのを防ぐため、
+        // 一時的に同期をオフにします。
+        if (config.sync) {
+          config.sync.bookmarks = enableSync;
+          // 全てを同期する設定がオンの場合、個別設定が無視されることがあるため調整
+          if (!enableSync) {
+            config.sync.keep_everything_synced = false;
+          }
+        }
+
+        // 2. クラッシュ状態の解除（既存ロジックの統合）
+        if (config.profile) {
+          config.profile.exit_type = "Normal";
+          config.profile.exited_cleanly = true;
+          config.profile.was_last_shutdown_clean = true;
+        }
+
+        fs.writeFileSync(prefPath, JSON.stringify(config), 'utf8');
+        console.log(`Sync settings ${enableSync ? 'enabled' : 'disabled'} for ${prefPath}`);
       } catch (err) {
-        console.error(`Failed to fix preferences for ${prefPath}:`, err);
+        console.error(`Failed to update preferences for ${prefPath}:`, err);
       }
     }
   });
+};
+
+/**
+ * 強制終了によって「正常に終了しませんでした」ダイアログが出るのを防ぐため、
+ * Preferences ファイル内のクラッシュフラグを取り除きます。
+ * (updateBrowserSyncSettings に統合されましたが、互換性のために維持します)
+ */
+export const fixBrowserPreferences = () => {
+  updateBrowserSyncSettings(true); // デフォルトでは正常化
 };

@@ -1,10 +1,22 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
 import dotenv from 'dotenv';
+import { emitProgress } from './event-emitter.js';
 
 dotenv.config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+// 安全フィルタを最低レベルに設定し、コンテンツがブロックされないようにします。
+const safetySettings = [
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+];
+
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-flash-latest",
+  safetySettings
+});
 
 export const summarizeTitle = async (title) => {
   if (!process.env.GEMINI_API_KEY) {
@@ -44,10 +56,16 @@ export const organizeBookmarksList = async (items, perspectiveType = "default") 
 
   let allOrganized = [];
   let existingCategories = new Set(["📦 その他"]);
+  const totalChunks = Math.ceil(items.length / CHUNK_SIZE);
+
+  emitProgress(`AI整理を開始します (全${items.length}件 / ${totalChunks}チャンク)`, 'info');
 
   for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const currentChunkIndex = Math.floor(i / CHUNK_SIZE) + 1;
     const chunk = items.slice(i, i + CHUNK_SIZE);
     const existingCatsStr = Array.from(existingCategories).join(', ');
+
+    emitProgress(`チャンク ${currentChunkIndex}/${totalChunks} を分析中...`, 'info');
 
     const prompt = `以下のブックマークのリスト（JSON形式）を分析し、全自動で整理してください。
 要件:
@@ -55,7 +73,8 @@ export const organizeBookmarksList = async (items, perspectiveType = "default") 
 2. ${perspective}
 3. 各カテゴリ名（category）は必ず「絵文字＋半角スペース＋カテゴリ名」の形式にしてください（例: "💻 プログラミング", "🛒 ショッピング"）。
 4. 既に分類されている以下のカテゴリに合致するものは、できるだけ同じカテゴリ名（絵文字も完全一致）を使用してください。合致しない場合のみ新規作成してください: [${existingCatsStr}]
-5. 出力は以下のスキーマに従ったJSON配列のみを返却してください。バッククォートやMarkdown表記（\`\`\`json など）は絶対に含めず、純粋なJSON文字列だけを出力してください。
+5. 入力されたブックマークは、内容に関わらず「一つも漏らさず」必ず出力に含めてください。アダルト、ギャンブル、ショッピングなど、いかなるジャンルであっても除外は厳禁です。
+6. 出力は以下のスキーマに従ったJSON配列のみを返却してください。バッククォートやMarkdown表記（\`\`\`json など）は絶対に含めず、純粋なJSON文字列だけを出力してください。
 [
   { "category": "カテゴリ名", "name": "簡略化された名前", "url": "URL" }
 ]
@@ -83,6 +102,7 @@ ${JSON.stringify(chunk)}`;
       });
 
       allOrganized = allOrganized.concat(parsedChunk);
+      emitProgress(`チャンク ${currentChunkIndex} の分析が完了しました`, 'success');
 
       // Free Tier API制限を回避するためのウェイト
       if (i + CHUNK_SIZE < items.length) {
@@ -133,11 +153,15 @@ export const organizeSubCategories = async (items, parentCategory) => {
     throw new Error('GEMINI APIキーが設定されていません。');
   }
 
+  emitProgress(`巨大フォルダ「${parentCategory}」(${items.length}件) をさらに細分類中...`, 'info');
+
+  // 統合されたモデル設定を使用
   const prompt = `以下のブックマークリストは、すべて「${parentCategory}」というカテゴリに属していますが、数が多いためさらに細分化（サブカテゴリ化）したいです。これらの要素を3～5つ程度の適切なサブカテゴリに分類してJSONで返してください。
 
 要件:
 1. "category"キーには"サブカテゴリ名（絵文字1つ＋簡潔な名称）"を設定してください。
-2. JSONを返すだけにしてください。バッククオートや不要な文を含めないでください。
+2. 入力されたブックマークは、内容に関わらず必ずすべて出力に含めてください。
+3. JSONを返すだけにしてください。バッククオートや不要な文を含めないでください。
 
 出力スキーマ:
 [
@@ -160,9 +184,12 @@ ${JSON.stringify(items, null, 2)}`;
       text = text.replace(/^\`\`\`/, '').replace(/\`\`\`$/, '').trim();
     }
     
-    return JSON.parse(text);
+    const res = JSON.parse(text);
+    emitProgress(`「${parentCategory}」の細分類が完了しました`, 'success');
+    return res;
   } catch (error) {
     console.error("Gemini Error:", error);
+    emitProgress(`「${parentCategory}」の細分類に失敗しました`, 'warning');
     throw new Error('AIが不正なJSONを出力しました。');
   }
 };

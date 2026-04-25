@@ -29,6 +29,8 @@ function App() {
   const { 
     bookmarks, 
     setBookmarks, 
+    syncSettings,
+    toggleSyncSetting,
     previewCandidates,
     activeCandidateIndex,
     selectCandidate,
@@ -40,21 +42,34 @@ function App() {
     aiOrganizeAll,
     applyPreviewAndSaveAll,
     rollbackAll,
+    loadSampleData,
+    logs,
+    clearLogs,
     loading,
     error
   } = useBookmarks();
+
+  const handleAiOrganize = () => {
+    clearLogs();
+    aiOrganizeAll();
+  };
 
   const previewState = activeCandidateIndex >= 0 ? previewCandidates[activeCandidateIndex].data : null;
   const setPreviewState = () => {}; // Dummy since we use selectCandidate now
 
   const [activeId, setActiveId] = useState(null);
+  const [showLogs, setShowLogs] = useState(true);
 
   const targetState = previewState || bookmarks;
   const setTargetState = previewState ? setPreviewState : setBookmarks;
 
   useEffect(() => {
-    fetchBookmarks();
-  }, [fetchBookmarks]);
+    if (import.meta.env.VITE_DEMO_MODE === 'true') {
+      loadSampleData();
+    } else {
+      fetchBookmarks();
+    }
+  }, [fetchBookmarks, loadSampleData]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -154,7 +169,7 @@ function App() {
             <>
               <button 
                 className="btn-primary" 
-                onClick={() => aiOrganizeAll(false)} 
+                onClick={handleAiOrganize} 
                 disabled={loading}
                 style={{ padding: '0.6rem 1.5rem', fontSize: '1.05rem', background: 'linear-gradient(135deg, #a855f7, #3b82f6)' }}
               >
@@ -246,6 +261,9 @@ function App() {
                 browser={browser} 
                 data={targetState[browser]} 
                 onSummarize={summarizeBookmarks}
+                syncSettings={syncSettings[browser]}
+                toggleSyncSetting={(rootKey) => toggleSyncSetting(browser, rootKey)}
+                isPreview={!!previewState}
               />
             ))}
           </DndContext>
@@ -258,6 +276,30 @@ function App() {
           <strong>警告:</strong> 「保存」を押下すると、現在開いているブラウザがすべて自動的に終了します。作業中のデータを保存してから実行してください。同期完了後、この画面（ローカルサーバー）が自動的に再起動します。
         </p>
       </footer>
+
+      {logs.length > 0 && (
+        <div className={`log-overlay ${showLogs ? '' : 'minimized'}`} style={{ width: showLogs ? '450px' : '200px' }}>
+          <div className="log-header" onClick={() => setShowLogs(!showLogs)} style={{ cursor: 'pointer', userSelect: 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexGrow: 1 }}>
+              <RefreshCw size={14} className={loading ? 'spin' : ''} />
+              <span>Server Live Logs</span>
+            </div>
+            <span style={{ fontSize: '1.2rem', fontWeight: 'bold', lineHeight: '1' }}>
+              {showLogs ? '−' : '+'}
+            </span>
+          </div>
+          {showLogs && (
+            <div className="log-content">
+              {logs.map((log, i) => (
+                <div key={i} className={`log-entry ${log.type}`}>
+                  <span className="log-time">{new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}</span>
+                  <span className="log-msg">{log.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

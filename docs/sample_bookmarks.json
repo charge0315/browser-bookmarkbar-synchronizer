@@ -1,0 +1,37 @@
+{
+  "chrome": {
+    "roots": {
+      "bookmark_bar": {
+        "children": [
+          { "type": "url", "name": "GitHub", "url": "https://github.com" },
+          { "type": "url", "name": "Stack Overflow", "url": "https://stackoverflow.com" },
+          { "type": "url", "name": "React Docs", "url": "https://react.dev" },
+          { "type": "folder", "name": "📦 Shopping", "children": [
+            { "type": "url", "name": "Amazon", "url": "https://www.amazon.co.jp" },
+            { "type": "url", "name": "Rakuten", "url": "https://www.rakuten.co.jp" }
+          ]}
+        ]
+      }
+    }
+  },
+  "edge": {
+    "roots": {
+      "bookmark_bar": {
+        "children": [
+          { "type": "url", "name": "Microsoft Learn", "url": "https://learn.microsoft.com" },
+          { "type": "url", "name": "Azure Portal", "url": "https://portal.azure.com" }
+        ]
+      }
+    }
+  },
+  "brave": {
+    "roots": {
+      "bookmark_bar": {
+        "children": [
+          { "type": "url", "name": "Brave Search", "url": "https://search.brave.com" },
+          { "type": "url", "name": "TechCrunch", "url": "https://techcrunch.com" }
+        ]
+      }
+    }
+  }
+}

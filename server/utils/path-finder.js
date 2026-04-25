@@ -56,13 +56,17 @@ export const saveBookmarks = (browser, data) => {
     }
 
     const stripSyncInfo = (node) => {
-      // 同期用IDやバージョン情報を削除
+      // 意図: 同期エンジンが「古いデータ」と「新しいデータ」を衝突させないように調整します。
+      
+      // 同期用トランザクションバージョンとメタ情報を削除（これによりローカルの変更を優先させる）
       delete node.sync_transaction_version;
       delete node.meta_info;
-      // GUIDを削除すると完全に新規扱いになるが、重複を避けるために一旦IDは残す。
-      // ただし、もし同期エンジンがGUIDを厳格に見ている場合は削除が必要。
-      // ここでは、再同期を促すために削除します。
-      delete node.guid;
+
+      // GUIDの扱い: 
+      // 既存のGUIDがある場合は、それを維持することでブラウザに「同一アイテムの移動」と認識させます。
+      // GUIDがない（AIが新しく作ったフォルダ等）場合、ブラウザが自動生成するのに任せます。
+      // かつては delete node.guid していましたが、これが重複（再ダウンロード）の主因となるため、
+      // 既存のものは残す方針に変更します。
       
       if (node.children) {
         node.children.forEach(stripSyncInfo);

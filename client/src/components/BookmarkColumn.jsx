@@ -12,16 +12,51 @@ const BROWSER_ICONS = {
   brave: <Zap size={20} color="#ff1b2d" />
 };
 
-export const BookmarkColumn = ({ browser, data, onSummarize }) => {
+export const BookmarkColumn = ({ 
+  browser, 
+  data, 
+  onSummarize, 
+  syncSettings, 
+  toggleSyncSetting,
+  isPreview 
+}) => {
   const children = data?.roots?.bookmark_bar?.children || [];
 
   return (
     <div className="browser-column">
       <div className="column-header">
-        {BROWSER_ICONS[browser] || <Globe size={20} color="#38bdf8" />}
-        <h2 style={{ textTransform: 'capitalize' }}>{browser}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {BROWSER_ICONS[browser] || <Globe size={20} color="#38bdf8" />}
+          <h2 style={{ textTransform: 'capitalize' }}>{browser}</h2>
+        </div>
         <span className="status-indicator">{children.length} items</span>
       </div>
+
+      {!isPreview && syncSettings && (
+        <div className="root-selector">
+          <button 
+            className={`root-toggle ${syncSettings.bookmark_bar ? 'active' : ''}`}
+            onClick={() => toggleSyncSetting('bookmark_bar')}
+            title="ブックマークバーを同期対象に含める"
+          >
+            Bar
+          </button>
+          <button 
+            className={`root-toggle ${syncSettings.other ? 'active' : ''}`}
+            onClick={() => toggleSyncSetting('other')}
+            title="「その他のブックマーク」を同期対象に含める"
+          >
+            Other
+          </button>
+          <button 
+            className={`root-toggle ${syncSettings.synced ? 'active' : ''}`}
+            onClick={() => toggleSyncSetting('synced')}
+            title="アカウント同期済みブックマークを同期対象に含める"
+          >
+            Synced
+          </button>
+        </div>
+      )}
       
       <div className="bookmark-list">
         <SortableContext 

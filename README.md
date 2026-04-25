@@ -19,6 +19,13 @@ Let AI clean, deduplicate, and categorize everything — instantly.
 
 <img src="./docs/demo.gif" width="720" alt="demo loop: before and after AI organization" />
 
+## 📸 Screenshots
+
+<img src="./docs/screenshot.png" width="720" alt="App Screenshot with sample data" />
+
+> **The Precision Dashboard.** Manage bookmarks across Chrome, Edge, and Brave with real-time AI progress logs. (Displayed with clean sample data)  
+> （精密なダッシュボードUI。Chrome, Edge, Braveのブックマークを、AIのリアルタイム進捗ログとともに管理できます。 ※画像はサンプルデータを使用した表示例です。）
+
 > **⚡ Watch AI turn chaos into structure in seconds.**  
 > Before: Messy, duplicated, scattered bookmarks.  
 > After: Clean, categorized, synced perfectly across Chromium browsers.
@@ -37,9 +44,13 @@ Let AI clean, deduplicate, and categorize everything — instantly.
   Never lose a bookmark. Any items the AI fails to categorize are automatically placed in a `📦 未分類 (要確認)` folder.  
   （AIが分類しきれなかったブックマークは「未分類」フォルダに自動救済。データの欠落を物理的に防ぎます）
 
-- **🤝 Unified Merge Engine**  
-  Extracts and deduplicates bookmarks from **all roots** (Bookmark Bar, Other Bookmarks, Synced Bookmarks).  
-  （全ての保存場所からブックマークを抽出し、重複を一本化して統合整理します）
+- **🤝 Unified Merge Engine & Root Selection**  
+  Extracts and deduplicates bookmarks from **specific roots** you choose (Bookmark Bar, Other Bookmarks, or Synced Bookmarks).  
+  （各ブラウザの「ブックマークバー」「その他のブックマーク」「同期済みブックマーク」から、同期対象に含めるルートを個別に選択・マージできます）
+
+- **🛡️ Sync Source Protection (Preservation Mode)**  
+  Unselected bookmark roots are safely preserved. For example, you can organize your local bookmark bar while keeping your account-synced bookmarks untouched.  
+  （選択しなかったルートのデータは保護され、削除されません。アカウント同期されたブックマークを汚さずにローカルバーだけを整理するといった運用が可能です）
 
 - **🔄 Enhanced Sync Reliability**  
   Specifically handles Chromium sync metadata and checksums to prevent the browser from reverting your changes.  
@@ -57,9 +68,13 @@ This tool exists to fix that — automatically.
 
 （複数ブラウザを使っていると「あのブックマークどこだっけ？」が頻発します。手動でのマージ対応は諦め、各ブラウザのブックマークバーをAIにより一撃で統合・整理させるために開発されました。）
 
-## 🔒 Privacy & Safety
+## 🔒 Privacy & Safety / プライバシーと安全性
 
 **Your bookmarks never leave your machine — except minimal metadata for AI processing.**
+
+- ⚠️ **Important Privacy Note / プライバシーに関する重要な注意事項:**  
+  This tool uses the **Gemini API** for organization. This means your bookmark titles and URLs are sent to Google's servers. By using this tool, you acknowledge that you are sharing information about your personal interests, preferences, and browsing habits with the AI service provider.  
+  （本ツールは整理のために **Gemini API** を使用します。これは、ブックマークのタイトルとURLがGoogleのサーバーに送信されることを意味します。本ツールを使用することで、個人の趣味・嗜好や閲覧傾向に関する情報がAIサービスプロバイダーに共有されることを理解し、同意したものとみなされます。）
 
 - 💻 **100% Local Execution:** Edits and writes directly to local browser filesystem.
 - 🛡️ **No Cloud Storage:** No bookmark data is ever stored on external databases.
@@ -92,42 +107,54 @@ This tool only affects the **currently logged-in Windows user**. It does not acc
 | **Backend** | Node.js, Express |
 | **AI Integration** | @google/generative-ai (Gemini 1.5 Flash/Pro) |
 
-## 🚀 Getting Started
+## 🚀 Getting Started / 始め方
 
-> ⚠️ **Platform Target:** The default local browser bookmark path detection is designed for **Windows OS**. For Mac/Linux, you will need to manually update paths in `server/utils/path-finder.js`.
+> ⚠️ **Platform Target:** The default local browser bookmark path detection is designed for **Windows OS**. For Mac/Linux, you will need to manually update paths in `server/utils/path-finder.js`.  
+> （デフォルトのパス検出は **Windows** 向けに設計されています。Mac/Linuxで使用する場合は `server/utils/path-finder.js` 内のパスを適宜書き換えてください。）
 
-### Prerequisites
+### 1. Prerequisites / 必須環境
 - Node.js `v18.0` or higher
-- [Gemini API Key](https://aistudio.google.com/app/apikey) (Free tier available)
+- **Gemini API Key / Gemini APIキー**
+  - Obtain a free API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+  - （[Google AI Studio](https://aistudio.google.com/app/apikey) にアクセスし、Googleアカウントでログインして「Create API key」から無料のキーを取得してください。）
 
-### 1. Clone the Repository
+### 2. Clone the Repository / リポジトリのクローン
 ```bash
 git clone https://github.com/charge0315/browser-bookmarkbar-synchronizer.git
 cd browser-bookmarkbar-synchronizer
 ```
 
-### 2. API Setup
-Create an `.env` file inside the `server/` directory and set your API key.
+### 3. API Setup / APIキーの設定
+Create an `.env` file inside the `server/` directory and set your API key.  
+（`server/` ディレクトリ内に `.env` ファイルを作成し、APIキーを設定してください。）
 ```bash
 GEMINI_API_KEY=your_api_key_here
 ```
 
-### 3. Install Dependencies
+### 4. Install & Run / インストールと実行
+Open two terminals and run the following:  
+（2つのターミナルを開き、それぞれ以下を実行してください。）
+
+**Terminal 1: Backend / バックエンド**
 ```bash
-# Terminal 1: Backend
 cd server
 npm install
 npm run dev
+```
 
-# Terminal 2: Frontend
+**Terminal 2: Frontend / フロントエンド**
+```bash
 cd client
 npm install
 npm run dev
 ```
 
-### 4. Execution
-Launch `http://localhost:5173`. Click the **"✨ AI全自動整理"** button!
-*(The tool will automatically handle closing and restarting your browsers when you apply changes)*
+### 5. Execution / 実行
+Launch `http://localhost:5173`. Select your root sources (Bar, Other, Synced) and click the **"✨ AI全自動整理"** button!  
+（ブラウザで `http://localhost:5173` を開き、同期対象のルートを選択してから「✨ AI全自動整理」ボタンをクリックしてください！）
+
+*(The tool will automatically handle closing and restarting your browsers when you apply changes)*  
+（保存を適用すると、ブラウザは自動的に一度終了し、再起動されます）
 
 
 ## 🚧 Roadmap

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import axios from 'axios';
 
 const API_BASE = 'http://localhost:3001/api';
@@ -13,11 +13,35 @@ const API_BASE = 'http://localhost:3001/api';
  */
 export const useBookmarks = () => {
   const [bookmarks, setBookmarks] = useState({ chrome: null, edge: null, brave: null });
+  const [syncSettings, setSyncSettings] = useState({
+    chrome: { bookmark_bar: true, other: true, synced: false },
+    edge: { bookmark_bar: true, other: true, synced: false },
+    brave: { bookmark_bar: true, other: true, synced: false }
+  });
   const [previewCandidates, setPreviewCandidates] = useState([]);
   const [activeCandidateIndex, setActiveCandidateIndex] = useState(-1);
   const [previewState, setPreviewState] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [logs, setLogs] = useState([]);
+
+  /**
+   * サーバーからのリアルタイムイベント（SSE）を購読します。
+   */
+  useEffect(() => {
+    const eventSource = new EventSource(`${API_BASE}/events`);
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setLogs((prev) => [...prev.slice(-4), data]); // 最新5件のみ保持
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, []);
+
+  const clearLogs = () => setLogs([]);
 
   /**
    * サーバーから全ブラウザのブックマークを取得します。
@@ -25,15 +49,18 @@ export const useBookmarks = () => {
    * 意図: 初期のマウント時や手動リロード時に最新情報を取得するためです。
    */
   const fetchBookmarks = useCallback(async () => {
+    console.log('Fetching bookmarks...');
     setLoading(true);
     try {
       const response = await axios.get(`${API_BASE}/bookmarks`);
+      console.log('Bookmarks fetched successfully');
       setBookmarks(response.data);
       setError(null);
     } catch (err) {
+      console.error('Fetch error:', err);
       setError('ブックマークの取得に失敗しました。サーバーが起動しているか確認してください。');
-      console.error(err);
     } finally {
+      console.log('Setting loading to false');
       setLoading(false);
     }
   }, []);
@@ -88,6 +115,51 @@ export const useBookmarks = () => {
       setLoading(false);
     }
   };
+
+  /**
+   * デモ用にクリーンなサンプルデータを読み込みます。
+   * 意図: スクリーンショット撮影時などにプライベートなブックマークを隠すためです。
+   */
+  const loadSampleData = useCallback(() => {
+    const sample = {
+      chrome: {
+        roots: {
+          bookmark_bar: {
+            children: [
+              { id: 's1', type: 'url', name: 'GitHub', url: 'https://github.com' },
+              { id: 's2', type: 'url', name: 'Stack Overflow', url: 'https://stackoverflow.com' },
+              { id: 's3', type: 'url', name: 'React Docs', url: 'https://react.dev' },
+              { id: 's4', type: 'folder', name: '🛒 Shopping', children: [
+                { id: 's5', type: 'url', name: 'Amazon', url: 'https://www.amazon.co.jp' },
+                { id: 's6', type: 'url', name: 'Rakuten', url: 'https://www.rakuten.co.jp' }
+              ]}
+            ]
+          }
+        }
+      },
+      edge: {
+        roots: {
+          bookmark_bar: {
+            children: [
+              { id: 's7', type: 'url', name: 'Microsoft Learn', url: 'https://learn.microsoft.com' },
+              { id: 's8', type: 'url', name: 'Azure Portal', url: 'https://portal.azure.com' }
+            ]
+          }
+        }
+      },
+      brave: {
+        roots: {
+          bookmark_bar: {
+            children: [
+              { id: 's9', type: 'url', name: 'Brave Search', url: 'https://search.brave.com' },
+              { id: 's10', type: 'url', name: 'TechCrunch', url: 'https://techcrunch.com' }
+            ]
+          }
+        }
+      }
+    };
+    setBookmarks(sample);
+  }, []);
 
   /**
    * 同一名・同一URLの重複を排除しながら、ローカルでブックマークを統合します。
@@ -253,8 +325,6 @@ export const useBookmarks = () => {
       });
     };
     
-    // 全てのルート（バー、その他、同期済み）から抽出します
-    const rootsToExtract = ['bookmark_bar', 'other', 'synced'];
     const priorityOrder = ['chrome', 'edge', 'brave'];
 
     // 優先順位に従ってブラウザごとに処理
@@ -262,9 +332,12 @@ export const useBookmarks = () => {
 
     browsers.forEach(browserKey => {
       const browserData = bookmarks[browserKey];
+      const settings = syncSettings[browserKey] || { bookmark_bar: true, other: true, synced: false };
+      
       if (browserData?.roots) {
-        rootsToExtract.forEach(rootKey => {
-          if (browserData.roots[rootKey]?.children) {
+        // 設定に基づいて抽出するルートを決定
+        Object.keys(settings).forEach(rootKey => {
+          if (settings[rootKey] && browserData.roots[rootKey]?.children) {
             extractUrls(browserData.roots[rootKey].children);
           }
         });
@@ -416,6 +489,22 @@ export const useBookmarks = () => {
   };
 
   /**
+   * ブラウザごとの同期設定（どのルートを抽出・上書き対象にするか）を切り替えます。
+   */
+  const toggleSyncSetting = (browser, rootKey) => {
+    setSyncSettings(prev => {
+      const current = prev[browser] || { bookmark_bar: true, other: true, synced: false };
+      return {
+        ...prev,
+        [browser]: {
+          ...current,
+          [rootKey]: !current[rootKey]
+        }
+      };
+    });
+  };
+
+  /**
    * プレビューでの確認結果を採用し、全てのブラウザ情報として一括保存、再起動要求を送ります。
    * 
    * 意図: 手動・バッチ通信ではなく統合APIを用いることで、
@@ -435,18 +524,31 @@ export const useBookmarks = () => {
       const newBookmarks = { ...bookmarks };
       for (const browser of Object.keys(newBookmarks)) {
         if (newBookmarks[browser] && newBookmarks[browser].roots) {
-          // 意図: ユーザーの「元のブックマークをすべて削除してから生成してほしい」という要望に応え、
-          // ブックマークバーだけでなく、その他(other)や同期済み(synced)も含めて一旦空にします。
+          const settings = syncSettings[browser] || { bookmark_bar: true, other: true, synced: false };
           const cleanRoots = { ...newBookmarks[browser].roots };
           
-          if (cleanRoots.bookmark_bar) {
+          // 意図: ユーザーが選択したルートのみを「整理対象」として上書き・空にします。
+          // 選択されていないルート（synced, other）は、重複を防ぐために「空」にして保存します。
+          // これにより、ブラウザ再起動時に古いデータがマージされて重複するのを防ぎます。
+          
+          if (settings.bookmark_bar) {
             cleanRoots.bookmark_bar = { ...cleanRoots.bookmark_bar, children: [...mergedList] };
           }
-          if (cleanRoots.other) {
+          
+          // 整理対象に含まなかったルートは、ブラウザ側での重複発生を防ぐため、
+          // 意図的に空（[]）として書き込みます。
+          if (!settings.other) {
             cleanRoots.other = { ...cleanRoots.other, children: [] };
+          } else if (settings.other && !settings.bookmark_bar) {
+             // bookmark_barが対象外でotherが対象の場合（レアケース）
+             cleanRoots.other = { ...cleanRoots.other, children: [...mergedList] };
           }
-          if (cleanRoots.synced) {
+
+          if (!settings.synced) {
             cleanRoots.synced = { ...cleanRoots.synced, children: [] };
+          } else if (settings.synced && !settings.bookmark_bar) {
+             // syncedが対象でbookmark_barが対象外の場合（レアケース）
+             cleanRoots.synced = { ...cleanRoots.synced, children: [...mergedList] };
           }
 
           newBookmarks[browser] = {
@@ -473,6 +575,8 @@ export const useBookmarks = () => {
   return {
     bookmarks,
     setBookmarks,
+    syncSettings,
+    toggleSyncSetting,
     previewCandidates,
     activeCandidateIndex,
     selectCandidate,
@@ -485,6 +589,9 @@ export const useBookmarks = () => {
     summarizeBookmarks,
     aiOrganizeAll,
     applyPreviewAndSaveAll,
-    rollbackAll
+    rollbackAll,
+    loadSampleData,
+    logs,
+    clearLogs
   };
 };
