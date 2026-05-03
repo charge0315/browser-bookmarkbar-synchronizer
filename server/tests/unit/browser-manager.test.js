@@ -36,7 +36,6 @@ const {
 
 describe('Browser Manager Utility (単体テスト)', () => {
   const chromePrefPath = 'C:\\Users\\tester\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Preferences';
-  const chromePrefBackupPath = `${chromePrefPath}.bak_antigravity_prefs`;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -72,7 +71,7 @@ describe('Browser Manager Utility (単体テスト)', () => {
   });
 
   describe('Preferences backup and restore', () => {
-    it('同期設定のバックアップと復元を行い、復元時に終了状態も正常化すること', () => {
+    it('同期設定のバックアップと復元を行い、復元時に終了状態も正常化すること', async () => {
       mockFiles.set(chromePrefPath, JSON.stringify({
         sync: {
           bookmarks: true,
@@ -83,29 +82,42 @@ describe('Browser Manager Utility (単体テスト)', () => {
         }
       }));
 
-      backupBrowserPreferences(['chrome']);
-      expect(mockFiles.has(chromePrefBackupPath)).toBe(true);
+      await backupBrowserPreferences(['chrome']);
 
-      updateBrowserSyncSettings(false, ['chrome']);
+      await updateBrowserSyncSettings(false, ['chrome']);
       const disabledConfig = JSON.parse(mockFiles.get(chromePrefPath));
       expect(disabledConfig.sync.bookmarks).toBe(false);
+      expect(disabledConfig.sync.disabled).toBe(true);
+      expect(disabledConfig.sync.sync_disabled).toBe(true);
       expect(disabledConfig.sync.keep_everything_synced).toBe(false);
       expect(disabledConfig.profile.exit_type).toBe('Normal');
 
-      restoreBrowserPreferences(['chrome']);
+      await restoreBrowserPreferences(['chrome']);
       const restoredConfig = JSON.parse(mockFiles.get(chromePrefPath));
       expect(restoredConfig.sync.bookmarks).toBe(true);
       expect(restoredConfig.sync.keep_everything_synced).toBe(true);
       expect(restoredConfig.profile.exit_type).toBe('Normal');
     });
 
-    it('不要になった Preferences バックアップを削除できること', () => {
-      mockFiles.set(chromePrefBackupPath, 'backup');
+    it('クリーンアップ後は保持していたスナップショットを使わずに復元をスキップすること', async () => {
+      mockFiles.set(chromePrefPath, JSON.stringify({
+        sync: {
+          bookmarks: true,
+          keep_everything_synced: true
+        },
+        profile: {
+          exit_type: 'Normal'
+        }
+      }));
 
+      await backupBrowserPreferences(['chrome']);
       cleanupBrowserPreferenceBackups(['chrome']);
+      mockFiles.set(chromePrefPath, '{"sync":{"bookmarks":false},"profile":{"exit_type":"Crashed"}}');
+      await restoreBrowserPreferences(['chrome']);
 
-      expect(mockFiles.has(chromePrefBackupPath)).toBe(false);
-      expect(mockFs.unlinkSync).toHaveBeenCalledWith(chromePrefBackupPath);
+      const currentConfig = JSON.parse(mockFiles.get(chromePrefPath));
+      expect(currentConfig.sync.bookmarks).toBe(false);
+      expect(mockFs.writeFileSync).not.toHaveBeenCalled();
     });
   });
 });

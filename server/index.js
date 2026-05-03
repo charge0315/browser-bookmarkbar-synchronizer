@@ -18,7 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '127.0.0.1';
 const PRE_RESTART_DELAY_MS = 1000;
-const SYNC_SETTLE_DELAY_MS = 8000;
+const SYNC_SETTLE_DELAY_MS = 20000;
 
 let activeSaveJob = null;
 let lastSaveJobState = {
@@ -125,10 +125,10 @@ const runSaveAllRebootSequence = async (bookmarksDict) => {
     await sleep(PRE_RESTART_DELAY_MS);
 
     emitProgress('元の同期設定を退避しています...', 'info');
-    backupBrowserPreferences(targetBrowsers);
+    await backupBrowserPreferences(targetBrowsers);
 
     emitProgress('同期重複防止のため、ブラウザの同期設定を一時的にOFFにします...', 'info');
-    updateBrowserSyncSettings(false, targetBrowsers);
+    await updateBrowserSyncSettings(false, targetBrowsers);
 
     emitProgress('新しいブックマーク構造を書き込み中...', 'info');
     for (const browser of targetBrowsers) {
@@ -147,8 +147,8 @@ const runSaveAllRebootSequence = async (bookmarksDict) => {
     await sleep(PRE_RESTART_DELAY_MS);
 
     emitProgress('退避していた同期設定を復元しています...', 'info');
-    restoreBrowserPreferences(targetBrowsers);
-    fixBrowserPreferences(targetBrowsers);
+    await restoreBrowserPreferences(targetBrowsers);
+    await fixBrowserPreferences(targetBrowsers);
 
     emitProgress('元の同期設定でブラウザを再起動します...', 'info');
     await restartBrowsers(targetBrowsers, { openDashboard: true });
@@ -169,18 +169,18 @@ const runSaveAllRebootSequence = async (bookmarksDict) => {
     }
 
     try {
-      restoreBrowserPreferences(targetBrowsers);
+      await restoreBrowserPreferences(targetBrowsers);
     } catch (restoreError) {
       console.error('Preference restore failed, fallback to sync enable:', restoreError);
       try {
-        updateBrowserSyncSettings(true, targetBrowsers);
+        await updateBrowserSyncSettings(true, targetBrowsers);
       } catch (syncError) {
         console.error('Failed to re-enable sync settings:', syncError);
       }
     }
 
     try {
-      fixBrowserPreferences(targetBrowsers);
+      await fixBrowserPreferences(targetBrowsers);
     } catch (fixError) {
       console.error('Failed to normalize browser preferences:', fixError);
     }

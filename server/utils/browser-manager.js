@@ -5,7 +5,10 @@ import fs from 'fs';
 const execAsync = promisify(exec);
 
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:5173';
-const PREFERENCES_BACKUP_SUFFIX = '.bak_antigravity_prefs';
+const FILE_OPERATION_RETRIES = 8;
+const FILE_OPERATION_RETRY_DELAY_MS = 250;
+const RETRYABLE_FILE_ERROR_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const preferenceSnapshots = new Map();
 
 const BROWSER_PROCESS_MAP = {
   chrome: 'chrome.exe',
@@ -45,6 +48,57 @@ const normalizeBrowsers = (browsers = Object.keys(BROWSER_PROCESS_MAP)) => {
 };
 
 /**
+ * 指定時間待機します。
+ *
+ * 意図: ブラウザ終了直後の一時的なロック解除待ちを、共通処理として扱うためです。
+ *
+ * @param {number} ms - 待機時間
+ * @returns {Promise<void>} 待機Promise
+ */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * リトライ対象のファイルエラーかを判定します。
+ *
+ * 意図: ブラウザ終了直後の一時的なアクセス拒否だけを再試行し、恒久的な異常は早めに表面化させるためです。
+ *
+ * @param {NodeJS.ErrnoException} error - 発生したエラー
+ * @returns {boolean} リトライ対象なら true
+ */
+const isRetryableFileError = (error) => {
+  return RETRYABLE_FILE_ERROR_CODES.has(error?.code || '');
+};
+
+/**
+ * ファイル操作を一定回数リトライ付きで実行します。
+ *
+ * 意図: ブラウザの終了完了タイミングの揺らぎで `EPERM` になるケースを吸収するためです。
+ *
+ * @template T
+ * @param {() => T} operation - 実行する処理
+ * @returns {Promise<T>} 実行結果
+ */
+const retryFileOperation = async (operation) => {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= FILE_OPERATION_RETRIES; attempt += 1) {
+    try {
+      return operation();
+    } catch (error) {
+      lastError = error;
+
+      if (!isRetryableFileError(error) || attempt === FILE_OPERATION_RETRIES) {
+        throw error;
+      }
+
+      await sleep(FILE_OPERATION_RETRY_DELAY_MS);
+    }
+  }
+
+  throw lastError;
+};
+
+/**
  * Preferences 内のクラッシュ関連フラグを正常終了扱いへ補正します。
  *
  * 意図: 強制終了を伴う保存フローの後でも、復帰時に「異常終了」ダイアログを極力出さないためです。
@@ -66,24 +120,40 @@ const markProfileAsClean = (config) => {
  *
  * 意図: JSON パースと共通の正常化処理を一箇所に集約し、書き込みロジックの重複と漏れを防ぐためです。
  *
- * @param {string} prefPath - Preferences ファイルパス
+ * @param {string} rawData - Preferences の生文字列
  * @param {(config: Object) => void} updater - 更新処理
+ * @returns {string} 更新後の JSON 文字列
  */
-const rewritePreferenceFile = (prefPath, updater) => {
-  const data = fs.readFileSync(prefPath, 'utf8');
-  const config = JSON.parse(data);
+const serializePreferenceConfig = (rawData, updater = () => {}) => {
+  const config = JSON.parse(rawData);
 
   updater(config);
   markProfileAsClean(config);
 
-  fs.writeFileSync(prefPath, JSON.stringify(config, null, 2), 'utf8');
+  return JSON.stringify(config, null, 2);
+};
+
+/**
+ * Preferences を読み込み、更新関数の結果を書き戻します。
+ *
+ * 意図: JSON パースと共通の正常化処理を一箇所に集約し、書き込みロジックの重複と漏れを防ぐためです。
+ *
+ * @param {string} prefPath - Preferences ファイルパス
+ * @param {(config: Object) => void} updater - 更新処理
+ */
+const rewritePreferenceFile = async (prefPath, updater) => {
+  await retryFileOperation(() => {
+    const data = fs.readFileSync(prefPath, 'utf8');
+    const serialized = serializePreferenceConfig(data, updater);
+    fs.writeFileSync(prefPath, serialized, 'utf8');
+  });
 };
 
 /**
  * 指定ブラウザの Preferences パス一覧を返します。
  *
  * @param {string[]} browsers - 対象ブラウザ一覧
- * @returns {Array<{ browser: string, prefPath: string, backupPath: string }>} パス情報
+ * @returns {Array<{ browser: string, prefPath: string }>} パス情報
  */
 const getPreferenceTargets = (browsers = Object.keys(BROWSER_PROCESS_MAP)) => {
   const prefPaths = getBrowserPreferencePaths();
@@ -93,8 +163,7 @@ const getPreferenceTargets = (browsers = Object.keys(BROWSER_PROCESS_MAP)) => {
       const prefPath = prefPaths[browser];
       return {
         browser,
-        prefPath,
-        backupPath: `${prefPath}${PREFERENCES_BACKUP_SUFFIX}`
+        prefPath
       };
     })
     .filter(target => target.prefPath);
@@ -159,13 +228,15 @@ export const restartBrowsers = async (
  *
  * @param {string[]} browsers - 対象ブラウザ一覧
  */
-export const backupBrowserPreferences = (browsers = Object.keys(BROWSER_PROCESS_MAP)) => {
-  for (const { prefPath, backupPath } of getPreferenceTargets(browsers)) {
+export const backupBrowserPreferences = async (browsers = Object.keys(BROWSER_PROCESS_MAP)) => {
+  for (const { browser, prefPath } of getPreferenceTargets(browsers)) {
     if (!fs.existsSync(prefPath)) {
+      preferenceSnapshots.delete(browser);
       continue;
     }
 
-    fs.copyFileSync(prefPath, backupPath);
+    const snapshot = await retryFileOperation(() => fs.readFileSync(prefPath, 'utf8'));
+    preferenceSnapshots.set(browser, snapshot);
   }
 };
 
@@ -176,14 +247,18 @@ export const backupBrowserPreferences = (browsers = Object.keys(BROWSER_PROCESS_
  *
  * @param {string[]} browsers - 対象ブラウザ一覧
  */
-export const restoreBrowserPreferences = (browsers = Object.keys(BROWSER_PROCESS_MAP)) => {
-  for (const { prefPath, backupPath } of getPreferenceTargets(browsers)) {
-    if (!fs.existsSync(backupPath)) {
+export const restoreBrowserPreferences = async (browsers = Object.keys(BROWSER_PROCESS_MAP)) => {
+  for (const { browser, prefPath } of getPreferenceTargets(browsers)) {
+    const snapshot = preferenceSnapshots.get(browser);
+
+    if (!snapshot) {
       continue;
     }
 
-    fs.copyFileSync(backupPath, prefPath);
-    rewritePreferenceFile(prefPath, () => {});
+    await retryFileOperation(() => {
+      const serialized = serializePreferenceConfig(snapshot);
+      fs.writeFileSync(prefPath, serialized, 'utf8');
+    });
   }
 };
 
@@ -195,16 +270,8 @@ export const restoreBrowserPreferences = (browsers = Object.keys(BROWSER_PROCESS
  * @param {string[]} browsers - 対象ブラウザ一覧
  */
 export const cleanupBrowserPreferenceBackups = (browsers = Object.keys(BROWSER_PROCESS_MAP)) => {
-  for (const { backupPath } of getPreferenceTargets(browsers)) {
-    if (!fs.existsSync(backupPath)) {
-      continue;
-    }
-
-    try {
-      fs.unlinkSync(backupPath);
-    } catch (error) {
-      console.warn(`Failed to clean preference backup: ${backupPath}`, error);
-    }
+  for (const browser of normalizeBrowsers(browsers)) {
+    preferenceSnapshots.delete(browser);
   }
 };
 
@@ -218,18 +285,20 @@ export const updateBrowserSyncSettings = (
   enableSync,
   browsers = Object.keys(BROWSER_PROCESS_MAP)
 ) => {
-  for (const { prefPath } of getPreferenceTargets(browsers)) {
+  return Promise.all(getPreferenceTargets(browsers).map(async ({ prefPath }) => {
     if (!fs.existsSync(prefPath)) {
-      continue;
+      return;
     }
 
     try {
-      rewritePreferenceFile(prefPath, (config) => {
+      await rewritePreferenceFile(prefPath, (config) => {
         if (!config.sync) {
           config.sync = {};
         }
 
         config.sync.bookmarks = enableSync;
+        config.sync.disabled = !enableSync;
+        config.sync.sync_disabled = !enableSync;
 
         if (!enableSync) {
           config.sync.keep_everything_synced = false;
@@ -239,7 +308,7 @@ export const updateBrowserSyncSettings = (
       console.error(`Failed to update preferences for ${prefPath}:`, error);
       throw error;
     }
-  }
+  }));
 };
 
 /**
@@ -249,14 +318,14 @@ export const updateBrowserSyncSettings = (
  *
  * @param {string[]} browsers - 対象ブラウザ一覧
  */
-export const fixBrowserPreferences = (browsers = Object.keys(BROWSER_PROCESS_MAP)) => {
+export const fixBrowserPreferences = async (browsers = Object.keys(BROWSER_PROCESS_MAP)) => {
   for (const { prefPath } of getPreferenceTargets(browsers)) {
     if (!fs.existsSync(prefPath)) {
       continue;
     }
 
     try {
-      rewritePreferenceFile(prefPath, () => {});
+      await rewritePreferenceFile(prefPath, () => {});
     } catch (error) {
       console.error(`Failed to normalize preferences for ${prefPath}:`, error);
       throw error;

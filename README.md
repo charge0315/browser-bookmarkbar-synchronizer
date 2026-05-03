@@ -52,11 +52,13 @@ Let AI clean, deduplicate, and categorize everything — instantly.
   Unselected bookmark roots are safely preserved. For example, you can organize your local bookmark bar while keeping your account-synced bookmarks untouched.  
   （選択しなかったルートのデータは保護され、削除されません。アカウント同期されたブックマークを汚さずにローカルバーだけを整理するといった運用が可能です）
 
-- **🔄 Enhanced Sync Reliability**  
-  Specifically handles Chromium sync metadata and checksums to prevent the browser from reverting your changes.  
+- **🔄 Enhanced Sync Reliability**
+  Specifically handles Chromium sync metadata and checksums to prevent the browser from reverting your changes.
   （ブラウザの同期機能によって勝手に元に戻される問題に対処済み。メタデータとチェックサムを自動調整します）
+  - The tool now waits longer after reboot to ensure Chromium has fully applied the temporary sync disable state.
+  - 再起動後の同期停止状態が安定するよう、待機時間を延長しました。
 
-- **🔙 Integrated Rollback**  
+- **🔙 Integrated Rollback**
   Made a mistake? Restore your previous bookmark state with a single click.  
   （AIによる整理結果が気に入らない場合、ボタン一つですぐに元の状態へ戻せます）
 
