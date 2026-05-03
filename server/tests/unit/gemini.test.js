@@ -14,6 +14,15 @@ const mockModel = {
 };
 
 jest.unstable_mockModule('@google/generative-ai', () => ({
+  HarmBlockThreshold: {
+    BLOCK_NONE: 'BLOCK_NONE'
+  },
+  HarmCategory: {
+    HARM_CATEGORY_HARASSMENT: 'HARM_CATEGORY_HARASSMENT',
+    HARM_CATEGORY_HATE_SPEECH: 'HARM_CATEGORY_HATE_SPEECH',
+    HARM_CATEGORY_SEXUALLY_EXPLICIT: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+    HARM_CATEGORY_DANGEROUS_CONTENT: 'HARM_CATEGORY_DANGEROUS_CONTENT'
+  },
   GoogleGenerativeAI: jest.fn(() => ({
     getGenerativeModel: () => mockModel
   }))

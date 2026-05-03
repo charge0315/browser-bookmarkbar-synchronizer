@@ -1,18 +1,21 @@
 import { jest } from '@jest/globals';
 import request from 'supertest';
 
-// Mocks
 jest.unstable_mockModule('../../utils/browser-manager.js', () => ({
+  backupBrowserPreferences: jest.fn(),
+  cleanupBrowserPreferenceBackups: jest.fn(),
   closeBrowsers: jest.fn().mockResolvedValue(),
+  fixBrowserPreferences: jest.fn(),
   restartBrowsers: jest.fn().mockResolvedValue(),
-  fixBrowserPreferences: jest.fn()
+  restoreBrowserPreferences: jest.fn(),
+  updateBrowserSyncSettings: jest.fn()
 }));
 
 jest.unstable_mockModule('../../utils/path-finder.js', () => ({
   saveBookmarks: jest.fn(),
   getBookmarks: jest.fn(),
   rollbackBookmarks: jest.fn(),
-  BROWSER_PATHS: { chrome: 'dummy' }
+  BROWSER_PATHS: { chrome: 'dummy', edge: 'dummy' }
 }));
 
 jest.unstable_mockModule('../../utils/gemini.js', () => ({
@@ -31,7 +34,7 @@ describe('API Integration Test (結合テスト)', () => {
   });
 
   describe('POST /api/save-all-reboot', () => {
-    it('辞書形式のブックマークデータを受け取り、全ブラウザの保存処理を呼び出すこと', async () => {
+    it('保存ジョブを受け付け、バックグラウンドで保存と復元処理を完走すること', async () => {
       jest.useFakeTimers();
       const payload = {
         bookmarksDict: {
@@ -43,18 +46,27 @@ describe('API Integration Test (結合テスト)', () => {
       const res = await request(app)
         .post('/api/save-all-reboot')
         .send(payload);
-      
-      expect(res.status).toBe(200);
-      expect(res.body.message).toContain('rebooting...');
-      
-      // 非同期のsetTimeoutを強制的に進めます
-      jest.runAllTimers();
-      
-      // タイマー終了後に呼び出されているかチェック
+
+      expect(res.status).toBe(202);
+      expect(res.body.message).toContain('Save sequence started');
+
+      await jest.runAllTimersAsync();
+
+      expect(browserManager.closeBrowsers).toHaveBeenCalledTimes(2);
+      expect(browserManager.restartBrowsers).toHaveBeenCalledTimes(2);
+      expect(browserManager.backupBrowserPreferences).toHaveBeenCalledWith(['chrome', 'edge']);
+      expect(browserManager.restoreBrowserPreferences).toHaveBeenCalledWith(['chrome', 'edge']);
+      expect(browserManager.cleanupBrowserPreferenceBackups).toHaveBeenCalledWith(['chrome', 'edge']);
+      expect(browserManager.updateBrowserSyncSettings).toHaveBeenCalledWith(false, ['chrome', 'edge']);
+
       expect(pathFinder.saveBookmarks).toHaveBeenCalledTimes(2);
       expect(pathFinder.saveBookmarks).toHaveBeenCalledWith('chrome', payload.bookmarksDict.chrome);
       expect(pathFinder.saveBookmarks).toHaveBeenCalledWith('edge', payload.bookmarksDict.edge);
-      
+
+      const statusRes = await request(app).get('/api/save-status');
+      expect(statusRes.status).toBe(200);
+      expect(statusRes.body.status).toBe('success');
+
       jest.useRealTimers();
     });
 
@@ -69,7 +81,7 @@ describe('API Integration Test (結合テスト)', () => {
   });
 
   describe('POST /api/sub-organize', () => {
-    it('20件以上のアイテムに対して正しくサブカテゴリ化処理を呼び出すこと', async () => {
+    it('親カテゴリ付きのリクエストでサブカテゴリ化処理を呼び出すこと', async () => {
       const gemini = await import('../../utils/gemini.js');
       gemini.organizeSubCategories.mockResolvedValue([
         { name: 'test', url: 'http://test', category: '📂 テスト' }

@@ -23,7 +23,7 @@ export const BookmarkColumn = ({
   const children = data?.roots?.bookmark_bar?.children || [];
 
   return (
-    <div className="browser-column">
+    <div className="browser-column" data-testid="bookmark-column" data-column-key={browser}>
       <div className="column-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           {BROWSER_ICONS[browser] || <Globe size={20} color="#38bdf8" />}

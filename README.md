@@ -77,8 +77,10 @@ This tool exists to fix that — automatically.
   （本ツールは整理のために **Gemini API** を使用します。これは、ブックマークのタイトルとURLがGoogleのサーバーに送信されることを意味します。本ツールを使用することで、個人の趣味・嗜好や閲覧傾向に関する情報がAIサービスプロバイダーに共有されることを理解し、同意したものとみなされます。）
 
 - 💻 **100% Local Execution:** Edits and writes directly to local browser filesystem.
+- 🔐 **Local-only Control API:** The local server binds to loopback only (`127.0.0.1`) and rejects non-local requests.
 - 🛡️ **No Cloud Storage:** No bookmark data is ever stored on external databases.
 - 🧠 **Minimal Context:** Only URLs and bookmark titles are sent to Gemini API.
+- 🌐 **No External Favicon Requests:** The dashboard does not call third-party favicon services while rendering your bookmarks.
 - ♻️ **Auto-Rollback Safe Write:** Before saving, a backup (`Bookmarks.bak_antigravity`) is created. If writing fails for any reason, it will automatically roll back to prevent data corruption.
 - 🛠️ **Preference Repair:** Automatically fixes browser Preferences files after sync to prevent "Restore Pages" crash dialogs.
 

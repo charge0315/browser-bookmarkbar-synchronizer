@@ -5,8 +5,7 @@ import {
   KeyboardSensor, 
   PointerSensor, 
   useSensor, 
-  useSensors, 
-  DragOverlay
+  useSensors
 } from '@dnd-kit/core';
 import { 
   arrayMove, 
@@ -15,8 +14,6 @@ import {
 import { 
   Save, 
   GitMerge, 
-  Type, 
-  ListOrdered, 
   RefreshCw,
   AlertTriangle,
   RotateCcw
@@ -33,11 +30,12 @@ function App() {
     toggleSyncSetting,
     previewCandidates,
     activeCandidateIndex,
+    previewState,
+    setPreviewState,
     selectCandidate,
     fetchBookmarks, 
     saveAll, 
     mergeBookmarks, 
-    organizeBookmarks, 
     summarizeBookmarks,
     aiOrganizeAll,
     applyPreviewAndSaveAll,
@@ -46,7 +44,8 @@ function App() {
     logs,
     clearLogs,
     loading,
-    error
+    error,
+    saveStatus
   } = useBookmarks();
 
   const handleAiOrganize = () => {
@@ -54,10 +53,6 @@ function App() {
     aiOrganizeAll();
   };
 
-  const previewState = activeCandidateIndex >= 0 ? previewCandidates[activeCandidateIndex].data : null;
-  const setPreviewState = () => {}; // Dummy since we use selectCandidate now
-
-  const [activeId, setActiveId] = useState(null);
   const [showLogs, setShowLogs] = useState(true);
 
   const targetState = previewState || bookmarks;
@@ -77,10 +72,6 @@ function App() {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
-
-  const handleDragStart = (event) => {
-    setActiveId(event.active.id);
-  };
 
   const findContainer = (id) => {
     for (const key of Object.keys(targetState)) {
@@ -119,15 +110,26 @@ function App() {
           ...prev,
           [activeContainer]: {
             ...prev[activeContainer],
-            roots: { ...prev[activeContainer].roots, bookmark_bar: { children: sourceChildren } }
+            roots: {
+              ...prev[activeContainer].roots,
+              bookmark_bar: {
+                ...prev[activeContainer].roots.bookmark_bar,
+                children: sourceChildren
+              }
+            }
           },
           [overContainer]: {
             ...prev[overContainer],
-            roots: { ...prev[overContainer].roots, bookmark_bar: { children: destChildren } }
+            roots: {
+              ...prev[overContainer].roots,
+              bookmark_bar: {
+                ...prev[overContainer].roots.bookmark_bar,
+                children: destChildren
+              }
+            }
           }
         }));
       }
-      setActiveId(null);
       return; 
     }
 
@@ -151,8 +153,6 @@ function App() {
         }
       }));
     }
-
-    setActiveId(null);
   };
 
   return (
@@ -171,6 +171,7 @@ function App() {
                 className="btn-primary" 
                 onClick={handleAiOrganize} 
                 disabled={loading}
+                data-testid="ai-organize-button"
                 style={{ padding: '0.6rem 1.5rem', fontSize: '1.05rem', background: 'linear-gradient(135deg, #a855f7, #3b82f6)' }}
               >
                 <RefreshCw size={20} className={loading ? 'spin' : ''} />
@@ -209,6 +210,7 @@ function App() {
                 className="btn-primary" 
                 onClick={applyPreviewAndSaveAll} 
                 disabled={loading}
+                data-testid="preview-save-button"
                 style={{ padding: '0.6rem 2rem', fontSize: '1.05rem', background: '#10b981' }}
               >
                 <Save size={20} />
@@ -219,6 +221,53 @@ function App() {
         </div>
       </header>
 
+      {saveStatus?.status && saveStatus.status !== 'idle' && (
+        <section
+          data-testid="save-status-banner"
+          style={{
+            marginBottom: '1.5rem',
+            padding: '1rem 1.25rem',
+            borderRadius: '12px',
+            border: `1px solid ${
+              saveStatus.status === 'success'
+                ? 'rgba(16, 185, 129, 0.35)'
+                : saveStatus.status === 'error'
+                  ? 'rgba(239, 68, 68, 0.35)'
+                  : 'rgba(56, 189, 248, 0.35)'
+            }`,
+            background:
+              saveStatus.status === 'success'
+                ? 'rgba(16, 185, 129, 0.12)'
+                : saveStatus.status === 'error'
+                  ? 'rgba(239, 68, 68, 0.12)'
+                  : 'rgba(56, 189, 248, 0.12)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <AlertTriangle
+              size={18}
+              color={
+                saveStatus.status === 'success'
+                  ? '#10b981'
+                  : saveStatus.status === 'error'
+                    ? '#ef4444'
+                    : '#38bdf8'
+              }
+            />
+            <div>
+              <div style={{ fontWeight: 700 }}>
+                {saveStatus.status === 'running' && '保存シーケンス実行中'}
+                {saveStatus.status === 'success' && '前回の保存は正常に完了しました'}
+                {saveStatus.status === 'error' && '前回の保存で復旧処理が発生しました'}
+              </div>
+              <div style={{ fontSize: '0.9rem', color: '#cbd5e1', marginTop: '0.2rem' }}>
+                {saveStatus.message}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {previewCandidates.length > 0 && (
         <div className="pattern-selector">
           <h3>AI分類パターンを選択してください:</h3>
@@ -228,6 +277,7 @@ function App() {
                 key={p.id} 
                 className={`pattern-card ${activeCandidateIndex === idx ? 'active' : ''}`}
                 onClick={() => selectCandidate(idx)}
+                data-testid={`pattern-card-${p.id}`}
               >
                 <span className="pattern-icon">{p.icon}</span>
                 <span className="pattern-label">{p.label}</span>
@@ -252,7 +302,6 @@ function App() {
           <DndContext 
             sensors={sensors}
             collisionDetection={closestCenter}
-            onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
             {Object.keys(targetState).map(browser => (

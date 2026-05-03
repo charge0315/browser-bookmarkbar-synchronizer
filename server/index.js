@@ -3,13 +3,216 @@ import cors from 'cors';
 import morgan from 'morgan';
 import { getBookmarks, saveBookmarks, rollbackBookmarks, BROWSER_PATHS } from './utils/path-finder.js';
 import { summarizeTitle, organizeBookmarksList, organizeSubCategories } from './utils/gemini.js';
-import { closeBrowsers, restartBrowsers, fixBrowserPreferences, updateBrowserSyncSettings } from './utils/browser-manager.js';
+import {
+  backupBrowserPreferences,
+  cleanupBrowserPreferenceBackups,
+  closeBrowsers,
+  fixBrowserPreferences,
+  restartBrowsers,
+  restoreBrowserPreferences,
+  updateBrowserSyncSettings
+} from './utils/browser-manager.js';
 import progressEmitter, { emitProgress } from './utils/event-emitter.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || '127.0.0.1';
+const PRE_RESTART_DELAY_MS = 1000;
+const SYNC_SETTLE_DELAY_MS = 8000;
 
-app.use(cors());
+let activeSaveJob = null;
+let lastSaveJobState = {
+  status: 'idle',
+  message: '保存ジョブはまだ実行されていません。',
+  updatedAt: new Date().toISOString()
+};
+
+/**
+ * ループバックアドレスかどうかを判定します。
+ *
+ * 意図: ローカル専用ツールの API を外部ネットワークへ露出させないためです。
+ *
+ * @param {string} remoteAddress - 接続元IP
+ * @returns {boolean} ループバックなら true
+ */
+const isLoopbackAddress = (remoteAddress = '') => {
+  return remoteAddress === '127.0.0.1'
+    || remoteAddress === '::1'
+    || remoteAddress === '::ffff:127.0.0.1';
+};
+
+/**
+ * ループバック由来の Origin だけを許可します。
+ *
+ * 意図: 同一端末上のローカルUIからの呼び出しに限定し、任意サイトからの操作を防ぐためです。
+ *
+ * @param {string | undefined} origin - Origin ヘッダ
+ * @returns {boolean} 許可する場合 true
+ */
+const isAllowedOrigin = (origin) => {
+  if (!origin) {
+    return true;
+  }
+
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
+  } catch (error) {
+    return false;
+  }
+};
+
+/**
+ * 指定時間待機します。
+ *
+ * 意図: ブラウザ再起動と設定反映の境目をサーバー側で一元管理するためです。
+ *
+ * @param {number} ms - 待機時間
+ * @returns {Promise<void>} 待機Promise
+ */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * 対象ブラウザ一覧を確定します。
+ *
+ * 意図: 保存対象が未定義のキーを含んでいても、下位のファイル操作が安全に進むようにするためです。
+ *
+ * @param {Record<string, Object>} bookmarksDict - 保存対象辞書
+ * @returns {string[]} 保存対象ブラウザ一覧
+ */
+const getTargetBrowsers = (bookmarksDict) => {
+  return Object.keys(bookmarksDict || {}).filter(browser => BROWSER_PATHS[browser] && bookmarksDict[browser]);
+};
+
+/**
+ * 保存ジョブの状態を更新します。
+ *
+ * 意図: 再起動後に UI が最後の成功/失敗を把握できるようにするためです。
+ *
+ * @param {'idle' | 'running' | 'success' | 'error'} status - 状態
+ * @param {string} message - 状態メッセージ
+ * @param {string | null} error - エラー内容
+ */
+const setSaveJobState = (status, message, error = null) => {
+  lastSaveJobState = {
+    status,
+    message,
+    error,
+    updatedAt: new Date().toISOString()
+  };
+};
+
+/**
+ * 保存シーケンス全体をバックグラウンドジョブとして実行します。
+ *
+ * 意図: レスポンス返却後もサーバー側で責任を持って完走・復旧できるようにするためです。
+ *
+ * @param {Record<string, Object>} bookmarksDict - 保存対象辞書
+ */
+const runSaveAllRebootSequence = async (bookmarksDict) => {
+  const targetBrowsers = getTargetBrowsers(bookmarksDict);
+  const savedBrowsers = [];
+
+  if (targetBrowsers.length === 0) {
+    throw new Error('保存対象のブラウザが見つかりません。');
+  }
+
+  setSaveJobState('running', '保存シーケンスを実行中です。');
+
+  try {
+    emitProgress('保存シーケンスを開始します。ブラウザを終了中...', 'info');
+    await closeBrowsers(targetBrowsers);
+    await sleep(PRE_RESTART_DELAY_MS);
+
+    emitProgress('元の同期設定を退避しています...', 'info');
+    backupBrowserPreferences(targetBrowsers);
+
+    emitProgress('同期重複防止のため、ブラウザの同期設定を一時的にOFFにします...', 'info');
+    updateBrowserSyncSettings(false, targetBrowsers);
+
+    emitProgress('新しいブックマーク構造を書き込み中...', 'info');
+    for (const browser of targetBrowsers) {
+      saveBookmarks(browser, bookmarksDict[browser]);
+      savedBrowsers.push(browser);
+    }
+
+    emitProgress('同期OFFの状態でブラウザを再起動し、ローカル変更を定着させます...', 'info');
+    await restartBrowsers(targetBrowsers, { openDashboard: true });
+
+    emitProgress('ローカル変更の定着を待機中...', 'info');
+    await sleep(SYNC_SETTLE_DELAY_MS);
+
+    emitProgress('元の同期設定へ戻すため、ブラウザを再度終了します...', 'info');
+    await closeBrowsers(targetBrowsers);
+    await sleep(PRE_RESTART_DELAY_MS);
+
+    emitProgress('退避していた同期設定を復元しています...', 'info');
+    restoreBrowserPreferences(targetBrowsers);
+    fixBrowserPreferences(targetBrowsers);
+
+    emitProgress('元の同期設定でブラウザを再起動します...', 'info');
+    await restartBrowsers(targetBrowsers, { openDashboard: true });
+    cleanupBrowserPreferenceBackups(targetBrowsers);
+
+    setSaveJobState('success', '保存と同期設定の復元が完了しました。');
+    emitProgress('保存と同期設定の復元が完了しました。', 'success');
+  } catch (error) {
+    console.error('Error in save-all-reboot job:', error);
+    emitProgress('保存シーケンスで問題が発生したため、元の状態への復旧を試みます...', 'error');
+
+    for (const browser of savedBrowsers.reverse()) {
+      try {
+        rollbackBookmarks(browser);
+      } catch (rollbackError) {
+        console.error(`Rollback failed for ${browser}:`, rollbackError);
+      }
+    }
+
+    try {
+      restoreBrowserPreferences(targetBrowsers);
+    } catch (restoreError) {
+      console.error('Preference restore failed, fallback to sync enable:', restoreError);
+      try {
+        updateBrowserSyncSettings(true, targetBrowsers);
+      } catch (syncError) {
+        console.error('Failed to re-enable sync settings:', syncError);
+      }
+    }
+
+    try {
+      fixBrowserPreferences(targetBrowsers);
+    } catch (fixError) {
+      console.error('Failed to normalize browser preferences:', fixError);
+    }
+
+    try {
+      await restartBrowsers(targetBrowsers, { openDashboard: true });
+    } catch (restartError) {
+      console.error('Failed to restart browsers after rollback:', restartError);
+    }
+
+    cleanupBrowserPreferenceBackups(targetBrowsers);
+    setSaveJobState('error', `保存シーケンスに失敗しました: ${error.message}`, error.message);
+    emitProgress(`保存シーケンスに失敗しました: ${error.message}`, 'error');
+  }
+};
+
+app.use((req, res, next) => {
+  if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    return res.status(403).json({ error: 'Local access only' });
+  }
+
+  next();
+});
+app.use(cors({
+  origin(origin, callback) {
+    if (isAllowedOrigin(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Blocked by CORS'));
+  }
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(morgan('dev'));
 
@@ -48,6 +251,10 @@ app.get('/api/bookmarks', (req, res) => {
   }
 });
 
+app.get('/api/save-status', (req, res) => {
+  res.json(lastSaveJobState);
+});
+
 app.post('/api/save', (req, res) => {
   const { browser, data } = req.body;
   if (!browser || !data) {
@@ -75,47 +282,20 @@ app.post('/api/save-all-reboot', async (req, res) => {
     return res.status(400).json({ error: 'Missing bookmarks dictionary' });
   }
 
-  try {
-    // 意図: ブラウザ起動中に同期が走って重複するのを防ぐため、
-    // 「同期OFFで起動して定着させる」→「同期ONに戻す」のダブル再起動シーケンスを行います。
-    emitProgress('保存シーケンスを開始します。ブラウザを終了中...', 'info');
-    await closeBrowsers();
-
-    setTimeout(async () => {
-      // 1. 同期設定を一時的に無効化
-      emitProgress('同期重複防止のため、ブラウザの同期設定を一時的にOFFにします...', 'info');
-      updateBrowserSyncSettings(false);
-
-      // 2. ブックマーク情報の書き込み
-      emitProgress('新しいブックマーク構造を書き込み中...', 'info');
-      Object.keys(bookmarksDict).forEach(browser => {
-        saveBookmarks(browser, bookmarksDict[browser]);
-      });
-
-      // 3. ブラウザを同期OFFの状態で一度起動（インポートを確定させる）
-      emitProgress('同期OFFの状態で一度ブラウザを起動し、データを確定させます...', 'info');
-      await restartBrowsers();
-
-      // 4. 数秒待機してから、同期をONに戻して最終起動
-      setTimeout(async () => {
-        emitProgress('同期設定をONに戻すための最終処理中...', 'info');
-        await closeBrowsers();
-        
-        setTimeout(async () => {
-          updateBrowserSyncSettings(true);
-          emitProgress('完了！同期をONにしてブラウザを最終起動します。', 'success');
-          await restartBrowsers();
-        }, 1000);
-
-      }, 8000); // 8秒間、同期OFFの状態でインポートさせる
-    }, 1000);
-
-    res.json({ message: 'Double-restart sync protection sequence started...' });
-  } catch (error) {
-    console.error(`Error in save-all-reboot:`, error);
-    emitProgress('保存シーケンス中にエラーが発生しました。', 'error');
-    res.status(500).json({ error: error.message });
+  if (getTargetBrowsers(bookmarksDict).length === 0) {
+    return res.status(400).json({ error: 'No supported browsers found in bookmarks dictionary' });
   }
+
+  if (activeSaveJob) {
+    return res.status(409).json({ error: 'A save sequence is already running' });
+  }
+
+  activeSaveJob = runSaveAllRebootSequence(bookmarksDict)
+    .finally(() => {
+      activeSaveJob = null;
+    });
+
+  res.status(202).json({ message: 'Save sequence started...' });
 });
 
 app.post('/api/rollback', (req, res) => {
@@ -181,8 +361,8 @@ app.post('/api/sub-organize', async (req, res) => {
 });
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`Server running on http://${HOST}:${PORT}`);
   });
 }
 

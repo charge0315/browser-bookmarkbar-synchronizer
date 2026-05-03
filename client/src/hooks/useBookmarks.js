@@ -1,7 +1,61 @@
 import { useState, useCallback, useEffect } from 'react';
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:3001/api';
+const getApiBase = () => {
+  if (typeof window === 'undefined') {
+    return 'http://localhost:3001/api';
+  }
+
+  const { protocol, hostname } = window.location;
+  const normalizedHostname = hostname.includes(':') && !hostname.startsWith('[')
+    ? `[${hostname}]`
+    : hostname;
+
+  return `${protocol}//${normalizedHostname}:3001/api`;
+};
+
+const API_BASE = getApiBase();
+
+/**
+ * ノード配列を深く複製します。
+ *
+ * 意図: プレビュー編集時に候補データの原本を壊さず、現在選択中の状態だけを安全に更新するためです。
+ *
+ * @param {Array<Object>} nodes - 複製対象ノード一覧
+ * @returns {Array<Object>} 複製後ノード一覧
+ */
+const cloneTreeNodes = (nodes = []) => {
+  return nodes.map(node => ({
+    ...node,
+    children: node.children ? cloneTreeNodes(node.children) : undefined
+  }));
+};
+
+/**
+ * プレビュー候補全体を複製します。
+ *
+ * 意図: 候補切り替え時にも、編集用 state と候補一覧が参照共有しないようにするためです。
+ *
+ * @param {Record<string, Object>} previewData - 複製対象プレビュー
+ * @returns {Record<string, Object>} 複製後プレビュー
+ */
+const clonePreviewData = (previewData = {}) => {
+  return Object.fromEntries(
+    Object.entries(previewData).map(([key, value]) => [
+      key,
+      {
+        ...value,
+        roots: {
+          ...value.roots,
+          bookmark_bar: {
+            ...value.roots?.bookmark_bar,
+            children: cloneTreeNodes(value.roots?.bookmark_bar?.children || [])
+          }
+        }
+      }
+    ])
+  );
+};
 
 /**
  * カスタムフック: ブックマークの操作と状態管理を提供します。
@@ -12,6 +66,7 @@ const API_BASE = 'http://localhost:3001/api';
  * @returns {Object} ブックマーク状態と各種操作関数
  */
 export const useBookmarks = () => {
+  const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true';
   const [bookmarks, setBookmarks] = useState({ chrome: null, edge: null, brave: null });
   const [syncSettings, setSyncSettings] = useState({
     chrome: { bookmark_bar: true, other: true, synced: false },
@@ -24,11 +79,19 @@ export const useBookmarks = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [logs, setLogs] = useState([]);
+  const [saveStatus, setSaveStatus] = useState({
+    status: 'idle',
+    message: '保存ジョブはまだ実行されていません。'
+  });
 
   /**
    * サーバーからのリアルタイムイベント（SSE）を購読します。
    */
   useEffect(() => {
+    if (isDemoMode) {
+      return undefined;
+    }
+
     const eventSource = new EventSource(`${API_BASE}/events`);
 
     eventSource.onmessage = (event) => {
@@ -39,9 +102,27 @@ export const useBookmarks = () => {
     return () => {
       eventSource.close();
     };
-  }, []);
+  }, [isDemoMode]);
 
   const clearLogs = () => setLogs([]);
+
+  /**
+   * 保存ジョブの最終状態を取得します。
+   *
+   * 意図: ブラウザ再起動後でも、直前の保存結果を UI 上で追跡できるようにするためです。
+   */
+  const fetchSaveStatus = useCallback(async () => {
+    if (isDemoMode) {
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API_BASE}/save-status`);
+      setSaveStatus(response.data);
+    } catch (err) {
+      console.error('Failed to fetch save status:', err);
+    }
+  }, [isDemoMode]);
 
   /**
    * サーバーから全ブラウザのブックマークを取得します。
@@ -65,6 +146,10 @@ export const useBookmarks = () => {
     }
   }, []);
 
+  useEffect(() => {
+    fetchSaveStatus();
+  }, [fetchSaveStatus]);
+
   /**
    * 現在のブックマークツリーを全ブラウザへ一括保存し、再起動要求を送るユーティリティです。
    * 
@@ -74,7 +159,11 @@ export const useBookmarks = () => {
     setLoading(true);
     try {
       await axios.post(`${API_BASE}/save-all-reboot`, { bookmarksDict: bookmarks });
-      alert('保存が完了しました。ブラウザが自動的に終了し、再起動しますので少々お待ちください。');
+      setSaveStatus({
+        status: 'running',
+        message: '保存シーケンスを開始しました。ブラウザが順次再起動します。'
+      });
+      alert('保存シーケンスを開始しました。ブラウザが順次再起動したあと、この画面で最終結果を確認できます。');
     } catch (err) {
       setError('ブックマークの保存と再起動リクエストに失敗しました。');
       console.error(err);
@@ -275,7 +364,7 @@ export const useBookmarks = () => {
           try {
             const res = await axios.post(`${API_BASE}/summarize`, { title: item.name });
             return { ...item, name: res.data.summary };
-          } catch (err) {
+          } catch {
             console.error('Failed to summarize:', item.name);
             return item;
           }
@@ -471,7 +560,7 @@ export const useBookmarks = () => {
 
       setPreviewCandidates(results);
       setActiveCandidateIndex(0);
-      setPreviewState(results[0].data);
+      setPreviewState(clonePreviewData(results[0].data));
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'AI処理中にエラーが発生しました。');
       console.error(err);
@@ -485,7 +574,7 @@ export const useBookmarks = () => {
    */
   const selectCandidate = (index) => {
     setActiveCandidateIndex(index);
-    setPreviewState(previewCandidates[index].data);
+    setPreviewState(clonePreviewData(previewCandidates[index].data));
   };
 
   /**
@@ -526,30 +615,25 @@ export const useBookmarks = () => {
         if (newBookmarks[browser] && newBookmarks[browser].roots) {
           const settings = syncSettings[browser] || { bookmark_bar: true, other: true, synced: false };
           const cleanRoots = { ...newBookmarks[browser].roots };
-          
-          // 意図: ユーザーが選択したルートのみを「整理対象」として上書き・空にします。
-          // 選択されていないルート（synced, other）は、重複を防ぐために「空」にして保存します。
-          // これにより、ブラウザ再起動時に古いデータがマージされて重複するのを防ぎます。
-          
-          if (settings.bookmark_bar) {
-            cleanRoots.bookmark_bar = { ...cleanRoots.bookmark_bar, children: [...mergedList] };
-          }
-          
-          // 整理対象に含まなかったルートは、ブラウザ側での重複発生を防ぐため、
-          // 意図的に空（[]）として書き込みます。
-          if (!settings.other) {
-            cleanRoots.other = { ...cleanRoots.other, children: [] };
-          } else if (settings.other && !settings.bookmark_bar) {
-             // bookmark_barが対象外でotherが対象の場合（レアケース）
-             cleanRoots.other = { ...cleanRoots.other, children: [...mergedList] };
-          }
 
-          if (!settings.synced) {
-            cleanRoots.synced = { ...cleanRoots.synced, children: [] };
-          } else if (settings.synced && !settings.bookmark_bar) {
-             // syncedが対象でbookmark_barが対象外の場合（レアケース）
-             cleanRoots.synced = { ...cleanRoots.synced, children: [...mergedList] };
-          }
+          let idCounter = Date.now();
+          const cloneNodesWithFreshIds = (nodes) => {
+            return nodes.map(node => ({
+              ...node,
+              id: String(idCounter++),
+              children: node.children ? cloneNodesWithFreshIds(node.children) : undefined
+            }));
+          };
+
+          const selectedRoots = Object.keys(settings).filter(rootKey => settings[rootKey]);
+
+          // 意図: 選択されたルートだけを更新し、未選択ルートはそのまま保護します。
+          selectedRoots.forEach(rootKey => {
+            cleanRoots[rootKey] = {
+              ...cleanRoots[rootKey],
+              children: cloneNodesWithFreshIds(mergedList)
+            };
+          });
 
           newBookmarks[browser] = {
             ...newBookmarks[browser],
@@ -563,7 +647,11 @@ export const useBookmarks = () => {
 
       // 自動全再起動エンドポイントへリクエスト
       await axios.post(`${API_BASE}/save-all-reboot`, { bookmarksDict: newBookmarks });
-      alert('保存が完了しました。ブラウザが自動的に再起動しますので少々お待ちください。');
+      setSaveStatus({
+        status: 'running',
+        message: '保存シーケンスを開始しました。ブラウザが順次再起動します。'
+      });
+      alert('保存シーケンスを開始しました。ブラウザが順次再起動したあと、この画面で最終結果を確認できます。');
     } catch (err) {
       setError('サーバーへの保存と再起動リクエスト中にエラーが発生しました。');
       console.error(err);
@@ -579,9 +667,12 @@ export const useBookmarks = () => {
     toggleSyncSetting,
     previewCandidates,
     activeCandidateIndex,
+    previewState,
+    setPreviewState,
     selectCandidate,
     loading,
     error,
+    saveStatus,
     fetchBookmarks,
     saveAll,
     mergeBookmarks,
@@ -592,6 +683,7 @@ export const useBookmarks = () => {
     rollbackAll,
     loadSampleData,
     logs,
-    clearLogs
+    clearLogs,
+    fetchSaveStatus
   };
 };

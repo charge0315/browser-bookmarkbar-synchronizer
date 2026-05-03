@@ -1,59 +1,111 @@
 import { jest } from '@jest/globals';
 
-// child_processとutilをモック化します
+const mockExec = jest.fn((command, callback) => callback(null, { stdout: '', stderr: '' }));
+const mockFiles = new Map();
+
+const mockFs = {
+  existsSync: jest.fn((filePath) => mockFiles.has(filePath)),
+  readFileSync: jest.fn((filePath) => mockFiles.get(filePath)),
+  writeFileSync: jest.fn((filePath, contents) => {
+    mockFiles.set(filePath, contents);
+  }),
+  copyFileSync: jest.fn((fromPath, toPath) => {
+    mockFiles.set(toPath, mockFiles.get(fromPath));
+  }),
+  unlinkSync: jest.fn((filePath) => {
+    mockFiles.delete(filePath);
+  })
+};
+
 jest.unstable_mockModule('child_process', () => ({
-  exec: jest.fn((cmd, cb) => cb(null, { stdout: '', stderr: '' }))
+  exec: mockExec
 }));
 
-// テスト対象モジュールをインポート
-const { closeBrowsers, restartBrowsers } = await import('../../utils/browser-manager.js');
+jest.unstable_mockModule('fs', () => ({
+  default: mockFs
+}));
 
-const cp = await import('child_process');
+const {
+  backupBrowserPreferences,
+  cleanupBrowserPreferenceBackups,
+  closeBrowsers,
+  restartBrowsers,
+  restoreBrowserPreferences,
+  updateBrowserSyncSettings
+} = await import('../../utils/browser-manager.js');
 
 describe('Browser Manager Utility (単体テスト)', () => {
+  const chromePrefPath = 'C:\\Users\\tester\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Preferences';
+  const chromePrefBackupPath = `${chromePrefPath}.bak_antigravity_prefs`;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    mockFiles.clear();
+    process.env.LOCALAPPDATA = 'C:\\Users\\tester\\AppData\\Local';
   });
 
   describe('closeBrowsers()', () => {
-    it('三種類のブラウザ（Chrome, Edge, Brave）に対して強制終了コマンドを発行すること', async () => {
+    it('三種類のブラウザに対して強制終了コマンドを発行すること', async () => {
       await closeBrowsers();
-      
-      const calls = cp.exec.mock.calls;
-      expect(calls.length).toBe(3);
-      expect(calls[0][0]).toContain('taskkill /IM chrome.exe /F');
-      expect(calls[1][0]).toContain('taskkill /IM msedge.exe /F');
-      expect(calls[2][0]).toContain('taskkill /IM brave.exe /F');
+
+      expect(mockExec).toHaveBeenCalledTimes(3);
+      expect(mockExec.mock.calls[0][0]).toContain('taskkill /IM chrome.exe /F');
+      expect(mockExec.mock.calls[1][0]).toContain('taskkill /IM msedge.exe /F');
+      expect(mockExec.mock.calls[2][0]).toContain('taskkill /IM brave.exe /F');
     });
 
-    it('プロセスが存在せずエラーになっても握り潰して続行すること', async () => {
-      // 意図的に失敗するモックを設定
-      cp.exec.mockImplementation((cmd, cb) => cb(new Error('Process not found'), { stdout: '', stderr: 'error' }));
+    it('プロセスが存在しないエラーでも継続すること', async () => {
+      mockExec.mockImplementation((command, callback) => callback(new Error('Process not found'), { stdout: '', stderr: '' }));
 
-      // エラーがスローされず正常終了することを確認
       await expect(closeBrowsers()).resolves.toBeUndefined();
     });
   });
 
   describe('restartBrowsers()', () => {
-    it('Chromeをlocalhost:5173で起動すること', async () => {
-      await restartBrowsers();
-      
-      const calls = cp.exec.mock.calls;
-      expect(calls.length).toBe(1);
-      expect(calls[0][0]).toContain('start chrome http://localhost:5173');
+    it('最初のブラウザではダッシュボードを開き、以降は通常起動すること', async () => {
+      await restartBrowsers(['edge', 'brave'], { openDashboard: true });
+
+      expect(mockExec).toHaveBeenCalledTimes(2);
+      expect(mockExec.mock.calls[0][0]).toContain('start "" msedge http://localhost:5173');
+      expect(mockExec.mock.calls[1][0]).toContain('start "" brave');
     });
   });
 
-  describe('fixBrowserPreferences()', () => {
-    it('Preferencesファイルが存在する場合、exit_typeの文字列置換を行うこと', async () => {
-      // fsをモック。 Preferences ファイルが存在すると仮定
-      const fs = await import('fs');
-      const mockContent = '{"profile":{"exit_type":"Crashed","exit_state":"Crashed"}}';
-      
-      // jest.spyOn は ESM では難しいので、モック全体を定義し直すか検討...
-      // すでに fs はインポートされている。 browser-manager.js 内の fs.readFileSync をモックする必要がある。
-      // 今回はシンプルにファイル操作が呼ばれるかどうかの確認に留めます。
+  describe('Preferences backup and restore', () => {
+    it('同期設定のバックアップと復元を行い、復元時に終了状態も正常化すること', () => {
+      mockFiles.set(chromePrefPath, JSON.stringify({
+        sync: {
+          bookmarks: true,
+          keep_everything_synced: true
+        },
+        profile: {
+          exit_type: 'Crashed'
+        }
+      }));
+
+      backupBrowserPreferences(['chrome']);
+      expect(mockFiles.has(chromePrefBackupPath)).toBe(true);
+
+      updateBrowserSyncSettings(false, ['chrome']);
+      const disabledConfig = JSON.parse(mockFiles.get(chromePrefPath));
+      expect(disabledConfig.sync.bookmarks).toBe(false);
+      expect(disabledConfig.sync.keep_everything_synced).toBe(false);
+      expect(disabledConfig.profile.exit_type).toBe('Normal');
+
+      restoreBrowserPreferences(['chrome']);
+      const restoredConfig = JSON.parse(mockFiles.get(chromePrefPath));
+      expect(restoredConfig.sync.bookmarks).toBe(true);
+      expect(restoredConfig.sync.keep_everything_synced).toBe(true);
+      expect(restoredConfig.profile.exit_type).toBe('Normal');
+    });
+
+    it('不要になった Preferences バックアップを削除できること', () => {
+      mockFiles.set(chromePrefBackupPath, 'backup');
+
+      cleanupBrowserPreferenceBackups(['chrome']);
+
+      expect(mockFiles.has(chromePrefBackupPath)).toBe(false);
+      expect(mockFs.unlinkSync).toHaveBeenCalledWith(chromePrefBackupPath);
     });
   });
 });

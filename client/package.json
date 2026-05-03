@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:demo": "vite --mode demo",
+    "dev:demo:e2e": "vite --mode demo --host 127.0.0.1 --port 4173 --strictPort",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

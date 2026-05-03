@@ -1,9 +1,9 @@
 import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ExternalLink, Folder, Hash, MoreHorizontal } from 'lucide-react';
+import { Folder, MoreHorizontal } from 'lucide-react';
 
-export const BookmarkItem = ({ item, browser, onSummarize }) => {
+export const BookmarkItem = ({ item, onSummarize }) => {
   const {
     attributes,
     listeners,
@@ -18,6 +18,16 @@ export const BookmarkItem = ({ item, browser, onSummarize }) => {
   };
 
   const isFolder = item?.type === 'folder';
+  const hostLabel = !isFolder && item?.url
+    ? (() => {
+        try {
+          return new URL(item.url).hostname.replace(/^www\./, '');
+        } catch {
+          return 'link';
+        }
+      })()
+    : '';
+  const hostInitial = hostLabel ? hostLabel.charAt(0).toUpperCase() : 'F';
 
   return (
     <div 
@@ -26,21 +36,14 @@ export const BookmarkItem = ({ item, browser, onSummarize }) => {
       {...attributes} 
       {...listeners}
       className={`bookmark-item ${isFolder ? 'folder-item' : ''}`}
+      data-testid="bookmark-item"
+      data-bookmark-title={item?.name || ''}
     >
       <div className="bookmark-favicon">
         {!isFolder && item?.url ? (
-          <img 
-            src={`https://www.google.com/s2/favicons?domain=${(() => {
-              try {
-                return new URL(item.url || 'http://localhost').hostname;
-              } catch (e) {
-                return 'localhost';
-              }
-            })()}&sz=32`} 
-            alt="favicon"
-            onError={(e) => { e.target.src = 'https://www.google.com/s2/favicons?domain=google.com'; }}
-            style={{ width: '16px', height: '16px' }}
-          />
+          <div className="bookmark-favicon-badge" aria-label={hostLabel}>
+            {hostInitial}
+          </div>
         ) : (
           <Folder size={16} color="#3b82f6" />
         )}

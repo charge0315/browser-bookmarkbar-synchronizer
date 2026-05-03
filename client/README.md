@@ -1,16 +1,16 @@
-# React + Vite
+# Client Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite based local dashboard for the bookmark organizer.
 
-Currently, two official plugins are available:
+## Scripts
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- `npm run dev`: start the Vite development server
+- `npm run dev:demo`: start the dashboard in sample-data mode
+- `npm run lint`: run ESLint
+- `npm run build`: create a production build
 
-## React Compiler
+## Notes
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- The dashboard expects the server API on `http://localhost:3001` (or the same hostname on port `3001`).
+- In demo mode (`VITE_DEMO_MODE=true`), the UI loads local sample data and skips live server status/events.
+- Save operations intentionally trigger browser shutdown/restart flows, so the dashboard reopens itself after the sequence completes.
