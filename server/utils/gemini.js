@@ -1,3 +1,10 @@
+/**
+ * @fileoverview Google Gemini APIを利用したブックマーク解析・整理ユーティリティ
+ * 
+ * 意図: 自然言語処理を用いて、ブックマークのタイトルの要約や、
+ * ユーザーが指定した観点に基づく最適なカテゴリ分類を自動化するためです。
+ */
+
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
 import dotenv from 'dotenv';
 import { emitProgress } from './event-emitter.js';
@@ -18,9 +25,18 @@ const model = genAI.getGenerativeModel({
   safetySettings
 });
 
+/**
+ * ブックマークのタイトルを短い日本語ラベルに要約します。
+ * 
+ * 意図: 元のタイトルが長すぎてUIを圧迫する場合に、AIで意味を抽出しつつ
+ * コンパクトな表示名に変換するためです。
+ *
+ * @param {string} title - 元のタイトル
+ * @returns {Promise<string>} 要約されたラベル
+ */
 export const summarizeTitle = async (title) => {
   if (!process.env.GEMINI_API_KEY) {
-    // Fallback if no key: slice and dice
+    // APIキーがない場合のフォールバック: 単純な切り出し
     return title.length > 10 ? title.substring(0, 10) + '...' : title;
   }
 
@@ -34,10 +50,21 @@ export const summarizeTitle = async (title) => {
     return response.text().trim();
   } catch (error) {
     console.error("Gemini Error:", error);
-    return title.substring(0, 10); // Fallback
+    return title.substring(0, 10); // エラー時のフォールバック
   }
 };
 
+/**
+ * 大量のブックマークアイテムを指定された観点でカテゴリ分類します。
+ * 
+ * 意図: 複数のブラウザから集まった膨大な未整理ブックマークを、
+ * AIに一括でコンテキスト解析させ、使いやすいフォルダ構造へと再構築するためです。
+ * 大量のデータを扱うため、チャンク分割して処理を行います。
+ *
+ * @param {Array<Object>} items - 分類対象のアイテム
+ * @param {string} perspectiveType - 分類の観点 (default, functional, topic, alternative)
+ * @returns {Promise<Array<Object>>} 分類結果の配列
+ */
 export const organizeBookmarksList = async (items, perspectiveType = "default") => {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error('GEMINI APIキーが設定されていません。.envファイルを確認してください。');
@@ -87,7 +114,7 @@ ${JSON.stringify(chunk)}`;
       const response = await result.response;
       let text = response.text().trim();
       
-      // JSONパースのクリーンアップ
+      // JSONパースのクリーンアップ（Markdown装飾の除去）
       if (text.startsWith('\`\`\`json')) {
         text = text.replace(/^\`\`\`json/, '').replace(/\`\`\`$/, '').trim();
       } else if (text.startsWith('\`\`\`')) {
@@ -96,7 +123,7 @@ ${JSON.stringify(chunk)}`;
 
       const parsedChunk = JSON.parse(text);
       
-      // 学習したカテゴリを次のチャンクに引き継ぐ
+      // 前のチャンクで生成されたカテゴリ名を学習し、整合性を保つ
       parsedChunk.forEach(item => {
         if (item.category) existingCategories.add(item.category);
       });
@@ -104,13 +131,13 @@ ${JSON.stringify(chunk)}`;
       allOrganized = allOrganized.concat(parsedChunk);
       emitProgress(`チャンク ${currentChunkIndex} の分析が完了しました`, 'success');
 
-      // Free Tier API制限を回避するためのウェイト
+      // 無料枠APIのレート制限を考慮した待機
       if (i + CHUNK_SIZE < items.length) {
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     } catch (error) {
       console.error("Gemini Organize Error chunking at index " + i + ":", error);
-      // 致命的なエラー（パース失敗など）の場合、このチャンクのアイテムを「未分類」として救済
+      // AIの解析が失敗した場合でも、URLを消失させないための救済措置
       const salvage = chunk.map(item => ({
         category: "📦 未分類 (要確認)",
         name: item.name,
@@ -120,8 +147,7 @@ ${JSON.stringify(chunk)}`;
     }
   }
 
-  // 最終的な整合性チェック: 入力の全URLが結果に含まれているか確認
-  const inputUrls = new Set(items.map(it => it.url));
+  // 最終チェック: 入力の全URLが結果に含まれているか（AIによる間引きを許容しない）
   const outputUrls = new Set(allOrganized.map(it => it.url));
 
   items.forEach(inputItem => {

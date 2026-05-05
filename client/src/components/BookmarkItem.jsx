@@ -1,8 +1,24 @@
+/**
+ * @fileoverview 個別のブックマーク項目（またはフォルダ）を表示するコンポーネント
+ * 
+ * 意図: 単一のブックマークの情報を整理して表示し、DND-kit による
+ * 並び替え操作のハンドル（属性）を提供するためです。
+ */
+
 import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Folder, MoreHorizontal } from 'lucide-react';
 
+/**
+ * ブックマークアイテムコンポーネント
+ * 
+ * 意図: アイテムがフォルダか通常のリンクかを判別し、適切なアイコンと情報をレンダリングするためです。
+ * 
+ * @param {Object} props
+ * @param {Object} props.item - ブックマークまたはフォルダのデータ
+ * @param {Function} props.onSummarize - 個別要約ボタン押下時のコールバック
+ */
 export const BookmarkItem = ({ item, onSummarize }) => {
   const {
     attributes,
@@ -18,6 +34,12 @@ export const BookmarkItem = ({ item, onSummarize }) => {
   };
 
   const isFolder = item?.type === 'folder';
+
+  /**
+   * ホスト名の抽出
+   * 
+   * 意図: URLから主要なドメイン部分を抜き出し、ファビコン代わりのバッジとして表示するためです。
+   */
   const hostLabel = !isFolder && item?.url
     ? (() => {
         try {

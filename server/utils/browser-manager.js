@@ -1,3 +1,9 @@
+/**
+ * @fileoverview ブラウザのプロセス制御および設定（Preferences）ファイルの管理ユーティリティ
+ * 
+ * 意図: ブラウザの強制終了・再起動、および同期設定の書き換えを安全に行い、ブックマークの書き込みを確実に定着させるためです。
+ */
+
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -276,7 +282,10 @@ export const cleanupBrowserPreferenceBackups = (browsers = Object.keys(BROWSER_P
 };
 
 /**
- * Preferences ファイル内の同期関連設定を JSON レベルで書き換えます。
+ * ブラウザの同期設定（ブックマーク同期）を一括更新します。
+ * 
+ * 意図: 大量のブックマークを書き換える際に、ブラウザのクラウド同期機能が働いて変更を上書き（巻き戻し）してしまわないよう、
+ * 一時的に同期機能を「完全に停止」させるためです。
  *
  * @param {boolean} enableSync - 同期を有効にするか無効にするか
  * @param {string[]} browsers - 対象ブラウザ一覧

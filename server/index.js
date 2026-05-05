@@ -1,3 +1,9 @@
+/**
+ * @fileoverview ブックマーク同期サーバーのメインエントリーポイント
+ * 
+ * 意図: ブラウザ間のブックマーク同期、AIによる自動整理、およびクライアントへの進捗通知を統括するAPIサーバーを提供するためです。
+ */
+
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
@@ -197,6 +203,11 @@ const runSaveAllRebootSequence = async (bookmarksDict) => {
   }
 };
 
+/**
+ * 接続元の制限設定
+ * 
+ * 意図: このツールはローカルPC内での動作を前提としているため、外部からの不正なAPI操作を物理的に遮断するためです。
+ */
 app.use((req, res, next) => {
   if (!isLoopbackAddress(req.socket.remoteAddress)) {
     return res.status(403).json({ error: 'Local access only' });
@@ -204,6 +215,12 @@ app.use((req, res, next) => {
 
   next();
 });
+
+/**
+ * CORS設定
+ * 
+ * 意図: ローカル環境のダッシュボード（Web UI）からの通信のみを安全に許可するためです。
+ */
 app.use(cors({
   origin(origin, callback) {
     if (isAllowedOrigin(origin)) {
@@ -213,6 +230,12 @@ app.use(cors({
     return callback(new Error('Blocked by CORS'));
   }
 }));
+
+/**
+ * ミドルウェア設定
+ * 
+ * 意図: 大容量のブックマークデータ（JSON）を扱えるようにし、開発時のデバッグログを標準出力するためです。
+ */
 app.use(express.json({ limit: '50mb' }));
 app.use(morgan('dev'));
 
@@ -238,6 +261,11 @@ app.get('/api/events', (req, res) => {
   });
 });
 
+/**
+ * ブックマーク取得エンドポイント
+ * 
+ * 意図: サポートされている全ブラウザから現在のブックマーク構造を読み込み、UIに表示可能な形式で返却するためです。
+ */
 app.get('/api/bookmarks', (req, res) => {
   try {
     const results = {};
@@ -251,10 +279,20 @@ app.get('/api/bookmarks', (req, res) => {
   }
 });
 
+/**
+ * 保存ジョブ状態取得エンドポイント
+ * 
+ * 意図: バックグラウンドで進行している「保存・再起動シーケンス」の進捗や最終結果をUI側で定期的に確認（ポーリング）できるようにするためです。
+ */
 app.get('/api/save-status', (req, res) => {
   res.json(lastSaveJobState);
 });
 
+/**
+ * 単一ブラウザ保存エンドポイント
+ * 
+ * 意図: 特定のブラウザに対して即座にブックマークを反映させたい場合に使用します。
+ */
 app.post('/api/save', (req, res) => {
   const { browser, data } = req.body;
   if (!browser || !data) {
@@ -298,6 +336,11 @@ app.post('/api/save-all-reboot', async (req, res) => {
   res.status(202).json({ message: 'Save sequence started...' });
 });
 
+/**
+ * ロールバック実行エンドポイント
+ * 
+ * 意図: 書き込み前に自動作成されたバックアップから、以前の正常な状態へブックマークを復元するためです。
+ */
 app.post('/api/rollback', (req, res) => {
   const { browser } = req.body;
   if (!browser) {
@@ -317,6 +360,11 @@ app.post('/api/rollback', (req, res) => {
   }
 });
 
+/**
+ * タイトル要約エンドポイント
+ * 
+ * 意図: ブックマークのタイトルが長すぎる場合に、AIを用いて意味を損なわずに短縮し、UIをすっきりさせるためです。
+ */
 app.post('/api/summarize', async (req, res) => {
   const { title } = req.body;
   if (!title) return res.status(400).json({ error: 'Missing title' });
@@ -329,6 +377,11 @@ app.post('/api/summarize', async (req, res) => {
   }
 });
 
+/**
+ * AIによる自動整理（メイン）エンドポイント
+ * 
+ * 意図: 散らばったブックマークをAIが分析し、指定された視点（仕事・趣味など）に基づいた理想的なカテゴリ構造を提案するためです。
+ */
 app.post('/api/ai-organize', async (req, res) => {
   try {
     const { items, perspective } = req.body;

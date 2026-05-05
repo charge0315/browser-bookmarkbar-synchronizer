@@ -1,6 +1,21 @@
+/**
+ * @fileoverview ブックマーク操作と状態管理のためのカスタムフック
+ * 
+ * 意図: APIとの通信、ドラッグ＆ドロップによる状態更新、AI整理のプレビュー管理など、
+ * フロントエンドのコアロジックを一箇所に集約し、コンポーネントから再利用しやすくするためです。
+ */
+
 import { useState, useCallback, useEffect } from 'react';
 import axios from 'axios';
 
+/**
+ * APIのベースURLを動的に決定します。
+ * 
+ * 意図: サーバーとクライアントが同じマシン上で動作することを前提に、
+ * 現在のホスト名に基づいて適切なAPIエンドポイント（ポート3001）を特定するためです。
+ *
+ * @returns {string} APIのベースURL
+ */
 const getApiBase = () => {
   if (typeof window === 'undefined') {
     return 'http://localhost:3001/api';

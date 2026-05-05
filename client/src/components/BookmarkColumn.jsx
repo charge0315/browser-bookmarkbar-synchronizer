@@ -1,3 +1,10 @@
+/**
+ * @fileoverview ブラウザごとのブックマークリストを表示するカラムコンポーネント
+ * 
+ * 意図: 特定のブラウザ（Chrome, Edge等）に属するブックマーク一覧を垂直に並べ、
+ * ドラッグ＆ドロップによる並び替えが可能なコンテナを提供するためです。
+ */
+
 import React from 'react';
 import { 
   SortableContext, 
@@ -12,6 +19,19 @@ const BROWSER_ICONS = {
   brave: <Zap size={20} color="#ff1b2d" />
 };
 
+/**
+ * ブックマークカラムコンポーネント
+ * 
+ * 意図: 単一ブラウザのブックマークデータを、ヘッダー、同期設定、リスト部分に分けて構築するためです。
+ * 
+ * @param {Object} props
+ * @param {string} props.browser - ブラウザの識別子（chrome, edge等）
+ * @param {Object} props.data - 当該ブラウザのブックマーク構造データ
+ * @param {Function} props.onSummarize - タイトル要約実行時のコールバック
+ * @param {Object} props.syncSettings - 同期対象設定（ブックマークバー、その他等）
+ * @param {Function} props.toggleSyncSetting - 同期対象の切り替え関数
+ * @param {boolean} props.isPreview - AIプレビュー表示中かどうか
+ */
 export const BookmarkColumn = ({ 
   browser, 
   data, 

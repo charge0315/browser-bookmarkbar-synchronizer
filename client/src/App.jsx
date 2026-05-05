@@ -1,3 +1,10 @@
+/**
+ * @fileoverview ブックマーク同期ツールのメインUIコンポーネント
+ * 
+ * 意図: ブラウザごとのブックマークを可視化し、AIによる自動整理や
+ * ドラッグ＆ドロップによる手動マージ・調整を行うメイン画面を提供するためです。
+ */
+
 import React, { useEffect, useState } from 'react';
 import { 
   DndContext, 
@@ -48,6 +55,11 @@ function App() {
     saveStatus
   } = useBookmarks();
 
+  /**
+   * AIによる自動整理の実行ハンドラ
+   * 
+   * 意図: ログをクリアしてAI解析を開始し、最新のステータスをユーザーに表示するためです。
+   */
   const handleAiOrganize = () => {
     clearLogs();
     aiOrganizeAll();
@@ -73,6 +85,14 @@ function App() {
     })
   );
 
+  /**
+   * アイテムがどのブラウザ（コンテナ）に属しているかを特定します。
+   * 
+   * 意図: ドラッグ操作中のアイテムが現在どこにあるか、またはどこへ移動しようとしているかを判定するためです。
+   *
+   * @param {string} id - アイテムのID
+   * @returns {string|null} ブラウザ名（chrome, edge, braveなど）
+   */
   const findContainer = (id) => {
     for (const key of Object.keys(targetState)) {
       if (targetState[key]?.roots?.bookmark_bar?.children.some(c => c.id === id)) {
@@ -82,6 +102,12 @@ function App() {
     return null;
   };
 
+  /**
+   * ドラッグ終了時の処理（ドロップ処理）
+   * 
+   * 意図: 同一ブラウザ内での並び替え、または異なるブラウザ間でのブックマークの移動を
+   * 状態（State）に反映させ、UIを最新の状態に保つためです。
+   */
   const handleDragEnd = (event) => {
     const { active, over } = event;
     const { id: activeId } = active;
@@ -91,10 +117,9 @@ function App() {
     const overContainer = overId ? (overId in targetState ? overId : findContainer(overId)) : null;
 
     if (!activeContainer || !overContainer || activeContainer !== overContainer) {
-      // NOTE: Because activeContainer !== overContainer block is here, dragging between different columns actually gets ignored in this implementation.
-      // But since we want users to drag across categories, we MUST support cross-container drag.
+      // 意図: 異なるブラウザ間（カラム間）でのドラッグ移動をサポートします。
+      // これにより、あるブラウザのブックマークを別のブラウザへマージする操作を直感的に行えます。
       if (activeContainer && overContainer && activeContainer !== overContainer) {
-        // Cross-container drag logic
         const sourceChildren = [...targetState[activeContainer].roots.bookmark_bar.children];
         const destChildren = [...targetState[overContainer].roots.bookmark_bar.children];
         const activeIndex = sourceChildren.findIndex(c => c.id === activeId);
@@ -133,6 +158,7 @@ function App() {
       return; 
     }
 
+    // 意図: 同一ブラウザ内での並び替えを反映します。
     if (activeId !== overId) {
       const children = targetState[activeContainer].roots.bookmark_bar.children;
       const oldIndex = children.findIndex(c => c.id === activeId);
