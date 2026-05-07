@@ -21,9 +21,22 @@ const safetySettings = [
 ];
 
 const model = genAI.getGenerativeModel({ 
-  model: "gemini-flash-latest",
+  model: "gemini-3.1-pro-preview",
   safetySettings
 });
+
+/**
+ * URLを比較用に正規化します。
+ * 
+ * 意図: httpとhttpsの違いや末尾のスラッシュの有無を無視して、実質的に同じサイトを同一視するためです。
+ * 
+ * @param {string} url - 対象URL
+ * @returns {string} 正規化されたURL
+ */
+const getNormalizedUrl = (url) => {
+  if (!url) return '';
+  return url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+};
 
 /**
  * ブックマークのタイトルを短い日本語ラベルに要約します。
@@ -148,10 +161,12 @@ ${JSON.stringify(chunk)}`;
   }
 
   // 最終チェック: 入力の全URLが結果に含まれているか（AIによる間引きを許容しない）
-  const outputUrls = new Set(allOrganized.map(it => it.url));
+  // 意図: http/httpsの違いを許容して漏れを判定するため、正規化して比較します。
+  const outputUrls = new Set(allOrganized.map(it => getNormalizedUrl(it.url)));
 
   items.forEach(inputItem => {
-    if (!outputUrls.has(inputItem.url)) {
+    const normUrl = getNormalizedUrl(inputItem.url);
+    if (!outputUrls.has(normUrl)) {
       console.warn(`Item missing after AI organization, salvaging: ${inputItem.url}`);
       allOrganized.push({
         category: "📦 未分類 (要確認)",

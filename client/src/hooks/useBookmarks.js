@@ -47,6 +47,19 @@ const cloneTreeNodes = (nodes = []) => {
 };
 
 /**
+ * URLを比較用に正規化します。
+ * 
+ * 意図: httpとhttpsの違いや末尾のスラッシュの有無を無視して、実質的に同じサイトを同一視するためです。
+ * 
+ * @param {string} url - 対象URL
+ * @returns {string} 正規化されたURL（プロトコルと末尾スラッシュ除去）
+ */
+const getNormalizedUrl = (url) => {
+  if (!url) return '';
+  return url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+};
+
+/**
  * プレビュー候補全体を複製します。
  *
  * 意図: 候補切り替え時にも、編集用 state と候補一覧が参照共有しないようにするためです。
@@ -293,12 +306,21 @@ export const useBookmarks = () => {
           }
         }
       } else if (item.type === 'url' && item.url) {
-        if (!uniqueUrls.has(item.url)) {
-          uniqueUrls.set(item.url, item);
+        const normUrl = getNormalizedUrl(item.url);
+        if (!uniqueUrls.has(normUrl)) {
+          uniqueUrls.set(normUrl, item);
         } else {
-          const existing = uniqueUrls.get(item.url);
-          if ((item.name || '').length > (existing.name || '').length) {
-            uniqueUrls.set(item.url, item);
+          const existing = uniqueUrls.get(normUrl);
+          // 優先度: 1. httpsを優先、2. 名前が長い方を優先
+          const isNewHttps = item.url.startsWith('https://');
+          const isExistingHttps = (existing.url || '').startsWith('https://');
+
+          if (isNewHttps && !isExistingHttps) {
+            uniqueUrls.set(normUrl, item);
+          } else if (isNewHttps === isExistingHttps) {
+            if ((item.name || '').length > (existing.name || '').length) {
+              uniqueUrls.set(normUrl, item);
+            }
           }
         }
       }
@@ -421,9 +443,17 @@ export const useBookmarks = () => {
         if (item.type === 'folder' && item.children) {
           extractUrls(item.children);
         } else if (item.type === 'url' && item.url) {
-          // 重複は一本化（最初に見つけたものを優先）
-          if (!uniqueUrlsMap.has(item.url)) {
-            uniqueUrlsMap.set(item.url, { name: item.name, url: item.url });
+          const normUrl = getNormalizedUrl(item.url);
+          // 重複は一本化（最初に見つけたものを優先。ただしhttpsを優先）
+          if (!uniqueUrlsMap.has(normUrl)) {
+            uniqueUrlsMap.set(normUrl, { name: item.name, url: item.url });
+          } else {
+            const existing = uniqueUrlsMap.get(normUrl);
+            const isNewHttps = item.url.startsWith('https://');
+            const isExistingHttps = (existing.url || '').startsWith('https://');
+            if (isNewHttps && !isExistingHttps) {
+              uniqueUrlsMap.set(normUrl, { name: item.name, url: item.url });
+            }
           }
         }
       });

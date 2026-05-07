@@ -48,6 +48,10 @@ Let AI clean, deduplicate, and categorize everything — instantly.
   Extracts and deduplicates bookmarks from **specific roots** you choose (Bookmark Bar, Other Bookmarks, or Synced Bookmarks).  
   （各ブラウザの「ブックマークバー」「その他のブックマーク」「同期済みブックマーク」から、同期対象に含めるルートを個別に選択・マージできます）
 
+- **🔗 Protocol-Agnostic Deduplication (http/https)**  
+  Smartly identifies and removes duplicate bookmarks even if one uses `http` and the other uses `https`. It automatically prioritizes keeping the more secure `https` version.  
+  （httpとhttpsが混在していても同一サイトとして識別し、重複を排除します。セキュリティの高い `https` 版を優先して保持します）
+
 - **🛡️ Sync Source Protection (Preservation Mode)**  
   Unselected bookmark roots are safely preserved. For example, you can organize your local bookmark bar while keeping your account-synced bookmarks untouched.  
   （選択しなかったルートのデータは保護され、削除されません。アカウント同期されたブックマークを汚さずにローカルバーだけを整理するといった運用が可能です）
@@ -109,7 +113,7 @@ This tool only affects the **currently logged-in Windows user**. It does not acc
 | --- | --- |
 | **Frontend** | React, Vite, @dnd-kit/core |
 | **Backend** | Node.js, Express |
-| **AI Integration** | @google/generative-ai (Gemini 1.5 Flash/Pro) |
+| **AI Integration** | @google/generative-ai (Gemini 3.1 Pro Preview) |
 
 ## 🚀 Getting Started / 始め方
 
