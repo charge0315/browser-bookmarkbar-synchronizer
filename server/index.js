@@ -34,6 +34,15 @@ let lastSaveJobState = {
 };
 
 /**
+ * 同期再開待ちの情報
+ *
+ * 意図: クラウド同期の自動再ONによる上書き事故を防ぐため、保存シーケンス完了後は
+ * 同期を無効化したまま停止し、ユーザーが内容を確認して明示的に再開するまで
+ * 対象ブラウザ一覧を保持しておくためです。
+ */
+let pendingResync = null;
+
+/**
  * ループバックアドレスかどうかを判定します。
  *
  * 意図: ローカル専用ツールの API を外部ネットワークへ露出させないためです。
@@ -109,6 +118,43 @@ const setSaveJobState = (status, message, error = null) => {
 };
 
 /**
+ * 空のブックマーク構造を生成します。
+ * 
+ * 意図: 同期前にブラウザのブックマークを完全にクリアするために使用します。
+ *
+ * @returns {Object} 空のブックマーク構造
+ */
+const makeEmptyBookmarks = () => ({
+  version: 1,
+  roots: {
+    bookmark_bar: {
+      children: [],
+      date_added: "0",
+      date_modified: "0",
+      id: "1",
+      name: "Bookmark Bar",
+      type: "folder"
+    },
+    other: {
+      children: [],
+      date_added: "0",
+      date_modified: "0",
+      id: "2",
+      name: "Other Bookmarks",
+      type: "folder"
+    },
+    synced: {
+      children: [],
+      date_added: "0",
+      date_modified: "0",
+      id: "3",
+      name: "Mobile Bookmarks",
+      type: "folder"
+    }
+  }
+});
+
+/**
  * 保存シーケンス全体をバックグラウンドジョブとして実行します。
  *
  * 意図: レスポンス返却後もサーバー側で責任を持って完走・復旧できるようにするためです。
@@ -133,12 +179,32 @@ const runSaveAllRebootSequence = async (bookmarksDict) => {
     emitProgress('元の同期設定を退避しています...', 'info');
     await backupBrowserPreferences(targetBrowsers);
 
+    // 【フェーズ1: ブックマークのクリア＆アカウント同期】
+    emitProgress('すべてのブラウザ의 ブックマークを削除（クリア）して同期準備中...', 'info');
+    for (const browser of targetBrowsers) {
+      saveBookmarks(browser, makeEmptyBookmarks());
+    }
+
+    emitProgress('空のブックマークをアカウントで同期させるため、ブラウザを再起動中...', 'info');
+    await restartBrowsers(targetBrowsers, { openDashboard: false });
+
+    // アカウントの同期時間を待機 (30秒間)
+    const CLOUD_SYNC_WAIT_MS = 30000;
+    emitProgress('アカウントでの空ブックマークの同期完了を待機しています（30秒）...', 'info');
+    await sleep(CLOUD_SYNC_WAIT_MS);
+
+    emitProgress('同期が完了しました。整理されたブックマークを反映するため、ブラウザを再度終了します...', 'info');
+    await closeBrowsers(targetBrowsers);
+    await sleep(PRE_RESTART_DELAY_MS);
+
     emitProgress('同期重複防止のため、ブラウザの同期設定を一時的にOFFにします...', 'info');
     await updateBrowserSyncSettings(false, targetBrowsers);
 
-    emitProgress('新しいブックマーク構造を書き込み中...', 'info');
+    // 【フェーズ2: さらにクリアしてから反映】
+    emitProgress('安全のため、さらにもう一度クリアしてから、整理されたブックマーク構造を書き込み中...', 'info');
     for (const browser of targetBrowsers) {
-      saveBookmarks(browser, bookmarksDict[browser]);
+      saveBookmarks(browser, makeEmptyBookmarks()); // さらにクリア
+      saveBookmarks(browser, bookmarksDict[browser]); // 反映
       savedBrowsers.push(browser);
     }
 
@@ -148,20 +214,16 @@ const runSaveAllRebootSequence = async (bookmarksDict) => {
     emitProgress('ローカル変更の定着を待機中...', 'info');
     await sleep(SYNC_SETTLE_DELAY_MS);
 
-    emitProgress('元の同期設定へ戻すため、ブラウザを再度終了します...', 'info');
-    await closeBrowsers(targetBrowsers);
-    await sleep(PRE_RESTART_DELAY_MS);
-
-    emitProgress('退避していた同期設定を復元しています...', 'info');
-    await restoreBrowserPreferences(targetBrowsers);
-    await fixBrowserPreferences(targetBrowsers);
-
-    emitProgress('元の同期設定でブラウザを再起動します...', 'info');
-    await restartBrowsers(targetBrowsers, { openDashboard: true });
-    cleanupBrowserPreferenceBackups(targetBrowsers);
-
-    setSaveJobState('success', '保存と同期設定の復元が完了しました。');
-    emitProgress('保存と同期設定の復元が完了しました。', 'success');
+    // 意図: ここで同期を自動的に再ONにすると、他デバイスに残る古いクラウド側データとの
+    // マージにより、今書き込んだ内容が上書きされてしまう事故が起こり得ます。
+    // そのため同期は無効のまま停止し、ユーザーが内容を確認したうえで
+    // /api/resume-sync を明示的に呼び出すまで再開しません。
+    pendingResync = { targetBrowsers };
+    setSaveJobState(
+      'awaiting-confirmation',
+      'ローカルへの保存が完了しました。ブックマークバーの内容を確認し、問題なければ「同期を再開する」を実行してください（同期は意図的に無効化されたままです）。'
+    );
+    emitProgress('ローカルへの保存が完了しました。内容を確認後、同期の再開を実行してください。', 'success');
   } catch (error) {
     console.error('Error in save-all-reboot job:', error);
     emitProgress('保存シーケンスで問題が発生したため、元の状態への復旧を試みます...', 'error');
@@ -198,8 +260,47 @@ const runSaveAllRebootSequence = async (bookmarksDict) => {
     }
 
     cleanupBrowserPreferenceBackups(targetBrowsers);
+    pendingResync = null;
     setSaveJobState('error', `保存シーケンスに失敗しました: ${error.message}`, error.message);
     emitProgress(`保存シーケンスに失敗しました: ${error.message}`, 'error');
+  }
+};
+
+/**
+ * ユーザーの確認後に、クラウド同期を安全に再開するシーケンスです。
+ *
+ * 意図: 保存直後の自動再ONによる上書き事故を避けるため、ユーザーが
+ * ブックマークバーの内容を確認してから明示的に呼び出すことを前提とした処理です。
+ */
+const runResumeSyncSequence = async () => {
+  if (!pendingResync) {
+    setSaveJobState('error', '再開できる保留中の同期処理がありません。', 'No pending resync');
+    return;
+  }
+
+  const { targetBrowsers } = pendingResync;
+  setSaveJobState('running', '同期設定を復元しています。');
+
+  try {
+    emitProgress('同期設定を復元するため、ブラウザを終了します...', 'info');
+    await closeBrowsers(targetBrowsers);
+    await sleep(PRE_RESTART_DELAY_MS);
+
+    emitProgress('退避していた同期設定を復元しています...', 'info');
+    await restoreBrowserPreferences(targetBrowsers);
+    await fixBrowserPreferences(targetBrowsers);
+
+    emitProgress('元の同期設定でブラウザを再起動します...', 'info');
+    await restartBrowsers(targetBrowsers, { openDashboard: true });
+    cleanupBrowserPreferenceBackups(targetBrowsers);
+
+    pendingResync = null;
+    setSaveJobState('success', '保存と同期設定の復元が完了しました。');
+    emitProgress('保存と同期設定の復元が完了しました。', 'success');
+  } catch (error) {
+    console.error('Error in resume-sync job:', error);
+    setSaveJobState('error', `同期の再開に失敗しました: ${error.message}`, error.message);
+    emitProgress(`同期の再開に失敗しました: ${error.message}`, 'error');
   }
 };
 
@@ -334,6 +435,29 @@ app.post('/api/save-all-reboot', async (req, res) => {
     });
 
   res.status(202).json({ message: 'Save sequence started...' });
+});
+
+/**
+ * 同期再開エンドポイント
+ *
+ * 意図: 保存シーケンス完了後、意図的に無効化したままにしているクラウド同期を、
+ * ユーザーが内容確認を終えたタイミングで明示的に再開させるためです。
+ */
+app.post('/api/resume-sync', async (req, res) => {
+  if (activeSaveJob) {
+    return res.status(409).json({ error: 'A save sequence is already running' });
+  }
+
+  if (!pendingResync) {
+    return res.status(400).json({ error: 'No pending sync resume operation' });
+  }
+
+  activeSaveJob = runResumeSyncSequence()
+    .finally(() => {
+      activeSaveJob = null;
+    });
+
+  res.status(202).json({ message: 'Resume-sync sequence started...' });
 });
 
 /**

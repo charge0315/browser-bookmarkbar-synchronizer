@@ -29,7 +29,7 @@ jest.unstable_mockModule('@google/generative-ai', () => ({
 }));
 
 // テスト対象モジュールをインポート
-const { organizeBookmarksList } = await import('../../utils/gemini.js');
+const { organizeBookmarksList, mergeCategoriesToTargetCount } = await import('../../utils/gemini.js');
 
 describe('Gemini Logic (AI整理ロジックの単体テスト)', () => {
   beforeEach(() => {
@@ -82,5 +82,76 @@ describe('Gemini Logic (AI整理ロジックの単体テスト)', () => {
     expect(result.length).toBe(1);
     expect(result[0].url).toBe('https://broken.com');
     expect(result[0].category).toContain('未分類');
+  });
+
+  describe('mergeCategoriesToTargetCount()', () => {
+    it('すでにカテゴリ数がtargetCount以下の場合は、変更せずにそのまま返すこと', async () => {
+      const items = [
+        { category: '💻 開発', name: 'Google', url: 'https://google.com' },
+        { category: '🛒 ショッピング', name: 'Amazon', url: 'https://amazon.com' }
+      ];
+      
+      const result = await mergeCategoriesToTargetCount(items, 15);
+      expect(result).toEqual(items);
+    });
+
+    it('カテゴリ数がtargetCountを超える場合、AIマージを適用して指定数以下にすること', async () => {
+      const items = Array.from({ length: 18 }, (_, i) => ({
+        category: `📂 カテゴリ${i}`,
+        name: `サイト${i}`,
+        url: `https://site${i}.com`
+      }));
+
+      // mockModelの挙動をモック
+      mockModel.generateContent.mockResolvedValueOnce({
+        response: {
+          text: () => JSON.stringify({
+            "📂 カテゴリ0": "📁 マージカテゴリA",
+            "📂 カテゴリ1": "📁 マージカテゴリA",
+            "📂 カテゴリ2": "📁 マージカテゴリB",
+            "📂 カテゴリ3": "📁 マージカテゴリB",
+            "📂 カテゴリ4": "📁 マージカテゴリC",
+            "📂 カテゴリ5": "📁 マージカテゴリC",
+            "📂 カテゴリ6": "📁 マージカテゴリC",
+            "📂 カテゴリ7": "📁 マージカテゴリC",
+            "📂 カテゴリ8": "📁 マージカテゴリC",
+            "📂 カテゴリ9": "📁 マージカテゴリC",
+            "📂 カテゴリ10": "📁 マージカテゴリC",
+            "📂 カテゴリ11": "📁 マージカテゴリC",
+            "📂 カテゴリ12": "📁 マージカテゴリC",
+            "📂 カテゴリ13": "📁 マージカテゴリC",
+            "📂 カテゴリ14": "📁 マージカテゴリC",
+            "📂 カテゴリ15": "📁 マージカテゴリC",
+            "📂 カテゴリ16": "📁 マージカテゴリC",
+            "📂 カテゴリ17": "📁 マージカテゴリC"
+          })
+        }
+      });
+
+      const result = await mergeCategoriesToTargetCount(items, 15);
+      const uniqueCats = Array.from(new Set(result.map(r => r.category)));
+
+      // 15以下に削減されていること
+      expect(uniqueCats.length).toBeLessThanOrEqual(15);
+      expect(uniqueCats).toContain("📁 マージカテゴリA");
+      expect(uniqueCats).toContain("📁 マージカテゴリB");
+      expect(uniqueCats).toContain("📁 マージカテゴリC");
+    });
+
+    it('AIマージが失敗（例外発生）した場合でも、フォールバック処理で15カテゴリ以下にすること', async () => {
+      const items = Array.from({ length: 18 }, (_, i) => ({
+        category: `📂 カテゴリ${i}`,
+        name: `サイト${i}`,
+        url: `https://site${i}.com`
+      }));
+
+      // 例外を発生させる
+      mockModel.generateContent.mockRejectedValueOnce(new Error("AI Error"));
+
+      const result = await mergeCategoriesToTargetCount(items, 15);
+      const uniqueCats = Array.from(new Set(result.map(r => r.category)));
+
+      expect(uniqueCats.length).toBeLessThanOrEqual(15);
+    });
   });
 });

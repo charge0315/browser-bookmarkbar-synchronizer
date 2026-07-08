@@ -20,8 +20,8 @@ const safetySettings = [
   { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
-const model = genAI.getGenerativeModel({ 
-  model: "gemini-3.1-pro-preview",
+const model = genAI.getGenerativeModel({
+  model: "gemini-3.5-flash",
   safetySettings
 });
 
@@ -176,7 +176,95 @@ ${JSON.stringify(chunk)}`;
     }
   });
 
-  return allOrganized;
+  // 15カテゴリ制限を適用
+  return await mergeCategoriesToTargetCount(allOrganized, 15);
+};
+
+/**
+ * 多数のカテゴリをちょうど15種類（または最大15種類）の代表的なカテゴリにマージします。
+ * 
+ * 意図: ユーザーの要望に基づき、トップフォルダの総数が15種類以下になるようにマージします。
+ *
+ * @param {Array<Object>} organizedItems - カテゴリ分け済みのアイテムリスト
+ * @param {number} targetCount - 目標のカテゴリ数
+ * @returns {Promise<Array<Object>>} マージされたアイテムリスト
+ */
+export const mergeCategoriesToTargetCount = async (organizedItems, targetCount = 15) => {
+  const categories = Array.from(new Set(organizedItems.map(item => item.category || '📦 その他')));
+  
+  if (categories.length <= targetCount) {
+    return organizedItems; // すでに15個以下ならマージ不要
+  }
+
+  emitProgress(`カテゴリ数が多いため（${categories.length}個）、AIで${targetCount}個のトップフォルダに統合します...`, 'info');
+
+  const prompt = `あなたは優秀なデータ整理アシスタントです。
+現在、ブックマークが以下の ${categories.length} 個のカテゴリに分類されています。
+ユーザーの要望により、これらのカテゴリを整理・統合して、トップフォルダの総数を【ちょうど ${targetCount} 個】に減らす必要があります。
+
+現在のカテゴリ一覧:
+${JSON.stringify(categories, null, 2)}
+
+要件:
+1. 現在のカテゴリを似たような概念やジャンルでマージし、最終的なユニークなカテゴリ数がちょうど ${targetCount} 個になるような「マージ先マッピング」を定義してください。
+2. 新しいカテゴリ名も「絵文字＋半角スペース＋カテゴリ名」の形式にしてください（例: "💻 テクノロジー", "🛒 ショッピング"）。
+3. マッピングは、元のすべてのカテゴリを漏れなく1つの新しいカテゴリに対応させてください。
+4. 出力は以下のJSON形式のオブジェクトのみを返却してください。余計な説明やMarkdown表記（\`\`\`json など）は絶対に含めず、純粋なJSON文字列だけを出力してください。
+
+出力形式例:
+{
+  "元のカテゴリ名1": "統合後のカテゴリ名A",
+  "元のカテゴリ名2": "統合後のカテゴリ名A",
+  "元のカテゴリ名3": "統合後のカテゴリ名B",
+  ...
+}`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    let text = (await result.response).text().trim();
+    if (text.startsWith('\`\`\`json')) {
+      text = text.replace(/^\`\`\`json/, '').replace(/\`\`\`$/, '').trim();
+    } else if (text.startsWith('\`\`\`')) {
+      text = text.replace(/^\`\`\`/, '').replace(/\`\`\`$/, '').trim();
+    }
+
+    const mapping = JSON.parse(text);
+    
+    // マッピングを適用
+    const mergedItems = organizedItems.map(item => {
+      const origCat = item.category || '📦 その他';
+      const newCat = mapping[origCat] || origCat;
+      return {
+        ...item,
+        category: newCat
+      };
+    });
+
+    const finalCategories = Array.from(new Set(mergedItems.map(item => item.category)));
+    emitProgress(`カテゴリの統合が完了しました（${categories.length}個 -> ${finalCategories.length}個）`, 'success');
+    return mergedItems;
+  } catch (error) {
+    console.error("Failed to merge categories:", error);
+    emitProgress("カテゴリの自動統合に失敗しました。フォールバック処理を行います。", "warning");
+    
+    // エラー時の単純なフォールバック：上位14個を残し、残りを「📦 その他」にマージ
+    const catCounts = {};
+    organizedItems.forEach(item => {
+      const cat = item.category || '📦 その他';
+      catCounts[cat] = (catCounts[cat] || 0) + 1;
+    });
+
+    const sortedCats = Object.keys(catCounts).sort((a, b) => catCounts[b] - catCounts[a]);
+    const topCats = new Set(sortedCats.slice(0, targetCount - 1));
+
+    return organizedItems.map(item => {
+      const cat = item.category || '📦 その他';
+      return {
+        ...item,
+        category: topCats.has(cat) ? cat : "📦 その他"
+      };
+    });
+  }
 };
 
 /**

@@ -201,6 +201,29 @@ export const useBookmarks = () => {
   };
 
   /**
+   * 保存後に意図的に無効化されたままの同期設定を再開します。
+   *
+   * 意図: 保存直後にクラウド同期を自動的に再ONにすると、他デバイス側に残る
+   * 古いデータとのマージで上書きされる恐れがあるため、ユーザーが保存結果を
+   * 確認したうえで明示的に呼び出す想定のアクションです。
+   */
+  const resumeSync = async () => {
+    setLoading(true);
+    try {
+      await axios.post(`${API_BASE}/resume-sync`);
+      setSaveStatus({
+        status: 'running',
+        message: '同期設定を復元しています。ブラウザが再起動します。'
+      });
+    } catch (err) {
+      setError('同期再開リクエストに失敗しました。');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
    * ロールバックAPIを利用し、直前のバックアップから復旧します。
    * 
    * 意図: 誤ったAI整理や手動ミスによる破壊的変更を取り消すためのセーフティネットです。
@@ -725,6 +748,7 @@ export const useBookmarks = () => {
     summarizeBookmarks,
     aiOrganizeAll,
     applyPreviewAndSaveAll,
+    resumeSync,
     rollbackAll,
     loadSampleData,
     logs,

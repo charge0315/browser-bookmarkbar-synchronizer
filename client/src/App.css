@@ -323,6 +323,38 @@ button {
   border-radius: 6px;
 }
 
+.bookmark-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
+.bookmark-item.editing {
+  cursor: default;
+}
+
+.bookmark-item.editing .bookmark-info {
+  gap: 0.4rem;
+}
+
+.bookmark-edit-input {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+}
+
+.bookmark-edit-input:focus {
+  outline: none;
+  border-color: #38bdf8;
+  background: rgba(255, 255, 255, 0.1);
+}
+
 /* Log Overlay Styles */
 .log-overlay {
   position: fixed;

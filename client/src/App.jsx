@@ -46,6 +46,7 @@ function App() {
     summarizeBookmarks,
     aiOrganizeAll,
     applyPreviewAndSaveAll,
+    resumeSync,
     rollbackAll,
     loadSampleData,
     logs,
@@ -69,6 +70,81 @@ function App() {
 
   const targetState = previewState || bookmarks;
   const setTargetState = previewState ? setPreviewState : setBookmarks;
+
+  /**
+   * ツリー内の指定IDのノードを再帰的に除外します。
+   *
+   * 意図: マージ後の一覧からフォルダの深さに関わらず、目的のアイテムだけを安全に削除するためです。
+   *
+   * @param {Array<Object>} children - 探索対象のノード一覧
+   * @param {string} itemId - 削除対象のID
+   * @returns {Array<Object>} 削除後のノード一覧
+   */
+  const removeItemById = (children = [], itemId) => {
+    return children
+      .filter(child => child.id !== itemId)
+      .map(child => (child.children ? { ...child, children: removeItemById(child.children, itemId) } : child));
+  };
+
+  /**
+   * ツリー内の指定IDのノードを再帰的に更新します。
+   *
+   * 意図: フォルダの深さに関わらず、編集対象アイテムの名前やURLだけを差し替えるためです。
+   *
+   * @param {Array<Object>} children - 探索対象のノード一覧
+   * @param {string} itemId - 更新対象のID
+   * @param {Object} patch - 反映する差分
+   * @returns {Array<Object>} 更新後のノード一覧
+   */
+  const updateItemById = (children = [], itemId, patch) => {
+    return children.map(child => {
+      if (child.id === itemId) {
+        return { ...child, ...patch };
+      }
+      if (child.children) {
+        return { ...child, children: updateItemById(child.children, itemId, patch) };
+      }
+      return child;
+    });
+  };
+
+  /**
+   * 指定コンテナ（ブラウザまたはカテゴリ）内のアイテムを削除します。
+   */
+  const handleDeleteItem = (containerKey, itemId) => {
+    setTargetState(prev => ({
+      ...prev,
+      [containerKey]: {
+        ...prev[containerKey],
+        roots: {
+          ...prev[containerKey].roots,
+          bookmark_bar: {
+            ...prev[containerKey].roots.bookmark_bar,
+            children: removeItemById(prev[containerKey].roots.bookmark_bar.children, itemId)
+          }
+        }
+      }
+    }));
+  };
+
+  /**
+   * 指定コンテナ（ブラウザまたはカテゴリ）内のアイテムを編集内容で更新します。
+   */
+  const handleUpdateItem = (containerKey, itemId, patch) => {
+    setTargetState(prev => ({
+      ...prev,
+      [containerKey]: {
+        ...prev[containerKey],
+        roots: {
+          ...prev[containerKey].roots,
+          bookmark_bar: {
+            ...prev[containerKey].roots.bookmark_bar,
+            children: updateItemById(prev[containerKey].roots.bookmark_bar.children, itemId, patch)
+          }
+        }
+      }
+    }));
+  };
 
   useEffect(() => {
     if (import.meta.env.VITE_DEMO_MODE === 'true') {
@@ -259,14 +335,23 @@ function App() {
                 ? 'rgba(16, 185, 129, 0.35)'
                 : saveStatus.status === 'error'
                   ? 'rgba(239, 68, 68, 0.35)'
-                  : 'rgba(56, 189, 248, 0.35)'
+                  : saveStatus.status === 'awaiting-confirmation'
+                    ? 'rgba(234, 179, 8, 0.4)'
+                    : 'rgba(56, 189, 248, 0.35)'
             }`,
             background:
               saveStatus.status === 'success'
                 ? 'rgba(16, 185, 129, 0.12)'
                 : saveStatus.status === 'error'
                   ? 'rgba(239, 68, 68, 0.12)'
-                  : 'rgba(56, 189, 248, 0.12)'
+                  : saveStatus.status === 'awaiting-confirmation'
+                    ? 'rgba(234, 179, 8, 0.12)'
+                    : 'rgba(56, 189, 248, 0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+            flexWrap: 'wrap'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -277,7 +362,9 @@ function App() {
                   ? '#10b981'
                   : saveStatus.status === 'error'
                     ? '#ef4444'
-                    : '#38bdf8'
+                    : saveStatus.status === 'awaiting-confirmation'
+                      ? '#eab308'
+                      : '#38bdf8'
               }
             />
             <div>
@@ -285,12 +372,25 @@ function App() {
                 {saveStatus.status === 'running' && '保存シーケンス実行中'}
                 {saveStatus.status === 'success' && '前回の保存は正常に完了しました'}
                 {saveStatus.status === 'error' && '前回の保存で復旧処理が発生しました'}
+                {saveStatus.status === 'awaiting-confirmation' && '内容確認待ち（同期は無効化されたままです）'}
               </div>
               <div style={{ fontSize: '0.9rem', color: '#cbd5e1', marginTop: '0.2rem' }}>
                 {saveStatus.message}
               </div>
             </div>
           </div>
+          {saveStatus.status === 'awaiting-confirmation' && (
+            <button
+              className="btn-primary"
+              onClick={resumeSync}
+              disabled={loading}
+              data-testid="resume-sync-button"
+              style={{ background: '#eab308', color: '#1e1b0d', flexShrink: 0 }}
+            >
+              <RefreshCw size={18} className={loading ? 'spin' : ''} />
+              同期を再開する
+            </button>
+          )}
         </section>
       )}
 
@@ -334,8 +434,10 @@ function App() {
               <BookmarkColumn 
                 key={browser} 
                 browser={browser} 
-                data={targetState[browser]} 
+                data={targetState[browser]}
                 onSummarize={summarizeBookmarks}
+                onDeleteItem={(itemId) => handleDeleteItem(browser, itemId)}
+                onUpdateItem={(itemId, patch) => handleUpdateItem(browser, itemId, patch)}
                 syncSettings={syncSettings[browser]}
                 toggleSyncSetting={(rootKey) => toggleSyncSetting(browser, rootKey)}
                 isPreview={!!previewState}

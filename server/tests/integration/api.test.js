@@ -33,8 +33,28 @@ describe('API Integration Test (結合テスト)', () => {
     jest.clearAllMocks();
   });
 
+  describe('POST /api/resume-sync', () => {
+    it('保留中の保存がない場合は400エラーを返すこと', async () => {
+      const res = await request(app)
+        .post('/api/resume-sync')
+        .send({})
+        .expect(400);
+
+      expect(res.body.error).toBe('No pending sync resume operation');
+    });
+  });
+
   describe('POST /api/save-all-reboot', () => {
-    it('保存ジョブを受け付け、バックグラウンドで保存と復元処理を完走すること', async () => {
+    it('パラメータが不足している場合は400エラーを返すこと', async () => {
+      const res = await request(app)
+        .post('/api/save-all-reboot')
+        .send({})
+        .expect(400);
+
+      expect(res.body.error).toBe('Missing bookmarks dictionary');
+    });
+
+    it('保存ジョブを受け付け、同期を無効化したまま確認待ち状態で停止し、resume-syncで安全に同期を再開できること', async () => {
       jest.useFakeTimers();
       const payload = {
         bookmarksDict: {
@@ -52,31 +72,35 @@ describe('API Integration Test (結合テスト)', () => {
 
       await jest.runAllTimersAsync();
 
+      // 意図: 保存直後に同期を自動再ONにすると他デバイス由来のデータで上書きされる恐れがあるため、
+      // このフェーズでは同期無効化(closeBrowsers/restartBrowsers 各2回)のみ行い、復元は行わない。
       expect(browserManager.closeBrowsers).toHaveBeenCalledTimes(2);
       expect(browserManager.restartBrowsers).toHaveBeenCalledTimes(2);
       expect(browserManager.backupBrowserPreferences).toHaveBeenCalledWith(['chrome', 'edge']);
-      expect(browserManager.restoreBrowserPreferences).toHaveBeenCalledWith(['chrome', 'edge']);
-      expect(browserManager.cleanupBrowserPreferenceBackups).toHaveBeenCalledWith(['chrome', 'edge']);
+      expect(browserManager.restoreBrowserPreferences).not.toHaveBeenCalled();
+      expect(browserManager.cleanupBrowserPreferenceBackups).not.toHaveBeenCalled();
       expect(browserManager.updateBrowserSyncSettings).toHaveBeenCalledWith(false, ['chrome', 'edge']);
 
-      expect(pathFinder.saveBookmarks).toHaveBeenCalledTimes(2);
-      expect(pathFinder.saveBookmarks).toHaveBeenCalledWith('chrome', payload.bookmarksDict.chrome);
-      expect(pathFinder.saveBookmarks).toHaveBeenCalledWith('edge', payload.bookmarksDict.edge);
+      expect(pathFinder.saveBookmarks).toHaveBeenCalledTimes(6);
 
-      const statusRes = await request(app).get('/api/save-status');
+      let statusRes = await request(app).get('/api/save-status');
       expect(statusRes.status).toBe(200);
+      expect(statusRes.body.status).toBe('awaiting-confirmation');
+
+      // 意図: ユーザーが内容を確認した後に明示的に呼び出すことで、初めて同期設定が復元されることを検証します。
+      const resumeRes = await request(app).post('/api/resume-sync').send({});
+      expect(resumeRes.status).toBe(202);
+      expect(resumeRes.body.message).toContain('Resume-sync sequence started');
+
+      await jest.runAllTimersAsync();
+
+      expect(browserManager.restoreBrowserPreferences).toHaveBeenCalledWith(['chrome', 'edge']);
+      expect(browserManager.cleanupBrowserPreferenceBackups).toHaveBeenCalledWith(['chrome', 'edge']);
+
+      statusRes = await request(app).get('/api/save-status');
       expect(statusRes.body.status).toBe('success');
 
       jest.useRealTimers();
-    });
-
-    it('パラメータが不足している場合は400エラーを返すこと', async () => {
-      const res = await request(app)
-        .post('/api/save-all-reboot')
-        .send({})
-        .expect(400);
-
-      expect(res.body.error).toBe('Missing bookmarks dictionary');
     });
   });
 

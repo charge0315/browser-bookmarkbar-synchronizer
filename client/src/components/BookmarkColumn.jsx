@@ -28,17 +28,21 @@ const BROWSER_ICONS = {
  * @param {string} props.browser - ブラウザの識別子（chrome, edge等）
  * @param {Object} props.data - 当該ブラウザのブックマーク構造データ
  * @param {Function} props.onSummarize - タイトル要約実行時のコールバック
+ * @param {Function} props.onDeleteItem - アイテム削除実行時のコールバック
+ * @param {Function} props.onUpdateItem - アイテム編集保存時のコールバック
  * @param {Object} props.syncSettings - 同期対象設定（ブックマークバー、その他等）
  * @param {Function} props.toggleSyncSetting - 同期対象の切り替え関数
  * @param {boolean} props.isPreview - AIプレビュー表示中かどうか
  */
-export const BookmarkColumn = ({ 
-  browser, 
-  data, 
-  onSummarize, 
-  syncSettings, 
+export const BookmarkColumn = ({
+  browser,
+  data,
+  onSummarize,
+  onDeleteItem,
+  onUpdateItem,
+  syncSettings,
   toggleSyncSetting,
-  isPreview 
+  isPreview
 }) => {
   const children = data?.roots?.bookmark_bar?.children || [];
 
@@ -86,11 +90,13 @@ export const BookmarkColumn = ({
         >
           {children.length > 0 ? (
             children.map(item => (
-              <BookmarkItem 
-                key={item.id} 
-                item={item} 
+              <BookmarkItem
+                key={item.id}
+                item={item}
                 browser={browser}
                 onSummarize={onSummarize}
+                onDelete={onDeleteItem}
+                onEdit={onUpdateItem}
               />
             ))
           ) : (

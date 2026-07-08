@@ -61,6 +61,8 @@ Let AI clean, deduplicate, and categorize everything — instantly.
   （ブラウザの同期機能によって勝手に元に戻される問題に対処済み。メタデータとチェックサムを自動調整します）
   - The tool now waits longer after reboot to ensure Chromium has fully applied the temporary sync disable state.
   - 再起動後の同期停止状態が安定するよう、待機時間を延長しました。
+  - After saving, sync stays **disabled** and the sequence pauses for your confirmation instead of automatically re-enabling it. This prevents another synced device from pushing stale data over your freshly organized bookmarks. Review the result, then click "同期を再開する" (Resume Sync) when ready.
+  - 保存後、同期は自動的に再開されず、意図的に無効化されたまま停止します。これは、同じアカウントに同期している他のデバイスが古いデータをクラウドへ書き戻し、整理直後のブックマークが上書きされる事故を防ぐためです。内容を確認し、問題なければ「同期を再開する」ボタンを押してください。
 
 - **🔙 Integrated Rollback**
   Made a mistake? Restore your previous bookmark state with a single click.  
@@ -113,7 +115,7 @@ This tool only affects the **currently logged-in Windows user**. It does not acc
 | --- | --- |
 | **Frontend** | React, Vite, @dnd-kit/core |
 | **Backend** | Node.js, Express |
-| **AI Integration** | @google/generative-ai (Gemini 3.1 Pro Preview) |
+| **AI Integration** | @google/generative-ai (Gemini 3.5 Flash) |
 
 ## 🚀 Getting Started / 始め方
 
