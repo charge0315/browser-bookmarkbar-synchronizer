@@ -7,7 +7,7 @@
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
-import { getBookmarks, saveBookmarks, rollbackBookmarks, BROWSER_PATHS } from './utils/path-finder.js';
+import { getBookmarks, saveBookmarks, rollbackBookmarks, clearSyncData, BROWSER_PATHS } from './utils/path-finder.js';
 import { summarizeTitle, organizeBookmarksList, organizeSubCategories } from './utils/gemini.js';
 import {
   backupBrowserPreferences,
@@ -21,8 +21,8 @@ import {
 import progressEmitter, { emitProgress } from './utils/event-emitter.js';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
-const HOST = process.env.HOST || '127.0.0.1';
+const PORT = process.env.PORT || 3002;
+const HOST = process.env.HOST || '0.0.0.0';
 const PRE_RESTART_DELAY_MS = 1000;
 const SYNC_SETTLE_DELAY_MS = 20000;
 
@@ -179,32 +179,16 @@ const runSaveAllRebootSequence = async (bookmarksDict) => {
     emitProgress('元の同期設定を退避しています...', 'info');
     await backupBrowserPreferences(targetBrowsers);
 
-    // 【フェーズ1: ブックマークのクリア＆アカウント同期】
-    emitProgress('すべてのブラウザ의 ブックマークを削除（クリア）して同期準備中...', 'info');
-    for (const browser of targetBrowsers) {
-      saveBookmarks(browser, makeEmptyBookmarks());
-    }
-
-    emitProgress('空のブックマークをアカウントで同期させるため、ブラウザを再起動中...', 'info');
-    await restartBrowsers(targetBrowsers, { openDashboard: false });
-
-    // アカウントの同期時間を待機 (30秒間)
-    const CLOUD_SYNC_WAIT_MS = 30000;
-    emitProgress('アカウントでの空ブックマークの同期完了を待機しています（30秒）...', 'info');
-    await sleep(CLOUD_SYNC_WAIT_MS);
-
-    emitProgress('同期が完了しました。整理されたブックマークを反映するため、ブラウザを再度終了します...', 'info');
-    await closeBrowsers(targetBrowsers);
-    await sleep(PRE_RESTART_DELAY_MS);
-
+    // 意図: ブラウザのクラウド同期が有効なままブックマークを書き換えると、
+    // クラウド側の古いデータで上書きされてしまいます。先に同期を無効化してから書き込みます。
+    // 同期の再開は /api/resume-sync で Sync Data をリセットした上で行うため、
+    // 旧フェーズ1（空ブックマークをクラウドに同期する30秒待ち）は不要になりました。
     emitProgress('同期重複防止のため、ブラウザの同期設定を一時的にOFFにします...', 'info');
     await updateBrowserSyncSettings(false, targetBrowsers);
 
-    // 【フェーズ2: さらにクリアしてから反映】
-    emitProgress('安全のため、さらにもう一度クリアしてから、整理されたブックマーク構造を書き込み中...', 'info');
+    emitProgress('整理されたブックマーク構造を書き込み中...', 'info');
     for (const browser of targetBrowsers) {
-      saveBookmarks(browser, makeEmptyBookmarks()); // さらにクリア
-      saveBookmarks(browser, bookmarksDict[browser]); // 反映
+      saveBookmarks(browser, bookmarksDict[browser]);
       savedBrowsers.push(browser);
     }
 
@@ -285,6 +269,19 @@ const runResumeSyncSequence = async () => {
     emitProgress('同期設定を復元するため、ブラウザを終了します...', 'info');
     await closeBrowsers(targetBrowsers);
     await sleep(PRE_RESTART_DELAY_MS);
+
+    // 意図: 同期エンジンの内部DB（Sync Data）をリセットすることで、
+    // 次回起動時に「初回同期」として扱われ、ローカルのブックマークが
+    // クラウドへ一方向プッシュされます。これにより、他デバイスに残る
+    // 古いクラウドデータでローカルが上書きされる事故を防ぎます。
+    emitProgress('同期データベースをリセットしています（初回同期を強制します）...', 'info');
+    for (const browser of targetBrowsers) {
+      try {
+        clearSyncData(browser);
+      } catch (syncClearError) {
+        console.warn(`Sync data clear skipped for ${browser}:`, syncClearError);
+      }
+    }
 
     emitProgress('退避していた同期設定を復元しています...', 'info');
     await restoreBrowserPreferences(targetBrowsers);

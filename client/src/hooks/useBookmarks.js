@@ -18,7 +18,7 @@ import axios from 'axios';
  */
 const getApiBase = () => {
   if (typeof window === 'undefined') {
-    return 'http://localhost:3001/api';
+    return 'http://localhost:3002/api';
   }
 
   const { protocol, hostname } = window.location;
@@ -26,7 +26,7 @@ const getApiBase = () => {
     ? `[${hostname}]`
     : hostname;
 
-  return `${protocol}//${normalizedHostname}:3001/api`;
+  return `${protocol}//${normalizedHostname}:3002/api`;
 };
 
 const API_BASE = getApiBase();

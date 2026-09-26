@@ -17,6 +17,40 @@ export const BROWSER_PATHS = {
 };
 
 /**
+ * ブラウザの Sync Data ディレクトリパス一覧
+ *
+ * 意図: Chromium同期エンジンの内部状態データベース（LevelDB）の場所を特定し、
+ * 同期再開時にリセットして「初回同期」を強制するためです。
+ */
+export const SYNC_DATA_PATHS = {
+  chrome: path.join(getLocalLow(), 'Google/Chrome/User Data/Default/Sync Data'),
+  edge: path.join(getLocalLow(), 'Microsoft/Edge/User Data/Default/Sync Data'),
+  brave: path.join(getLocalLow(), 'BraveSoftware/Brave-Browser/User Data/Default/Sync Data'),
+};
+
+/**
+ * ブラウザの Sync Data ディレクトリを削除します。
+ *
+ * 意図: 同期エンジンの内部状態をリセットし、次回起動時に「初回同期」として
+ * ローカルのブックマークをクラウドへ一方向プッシュさせるためです。
+ * ブックマーク以外の同期データ（パスワード、拡張機能等）もローカルキャッシュが
+ * クリアされますが、クラウドから再ダウンロードされます。
+ *
+ * @param {string} browser - ブラウザ名 (chrome, edge, brave)
+ * @returns {boolean} 削除に成功した場合 true
+ */
+export const clearSyncData = (browser) => {
+  const syncPath = SYNC_DATA_PATHS[browser];
+  if (!syncPath) throw new Error(`Unknown browser: ${browser}`);
+
+  if (fs.existsSync(syncPath)) {
+    fs.rmSync(syncPath, { recursive: true, force: true });
+    return true;
+  }
+  return false;
+};
+
+/**
  * 指定されたブラウザのブックマークデータを取得します。
  * 
  * 意図: ブラウザごとの JSON 構造をそのままメモリ上に読み込み、

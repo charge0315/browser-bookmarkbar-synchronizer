@@ -15,6 +15,7 @@ jest.unstable_mockModule('../../utils/path-finder.js', () => ({
   saveBookmarks: jest.fn(),
   getBookmarks: jest.fn(),
   rollbackBookmarks: jest.fn(),
+  clearSyncData: jest.fn(),
   BROWSER_PATHS: { chrome: 'dummy', edge: 'dummy' }
 }));
 
@@ -72,16 +73,17 @@ describe('API Integration Test (結合テスト)', () => {
 
       await jest.runAllTimersAsync();
 
-      // 意図: 保存直後に同期を自動再ONにすると他デバイス由来のデータで上書きされる恐れがあるため、
-      // このフェーズでは同期無効化(closeBrowsers/restartBrowsers 各2回)のみ行い、復元は行わない。
-      expect(browserManager.closeBrowsers).toHaveBeenCalledTimes(2);
-      expect(browserManager.restartBrowsers).toHaveBeenCalledTimes(2);
+      // 意図: 旧フェーズ1（空同期30秒待ち＋ブラウザ2回再起動）は廃止されたため、
+      // closeBrowsers/restartBrowsers はそれぞれ1回だけ呼ばれることを検証します。
+      expect(browserManager.closeBrowsers).toHaveBeenCalledTimes(1);
+      expect(browserManager.restartBrowsers).toHaveBeenCalledTimes(1);
       expect(browserManager.backupBrowserPreferences).toHaveBeenCalledWith(['chrome', 'edge']);
       expect(browserManager.restoreBrowserPreferences).not.toHaveBeenCalled();
       expect(browserManager.cleanupBrowserPreferenceBackups).not.toHaveBeenCalled();
       expect(browserManager.updateBrowserSyncSettings).toHaveBeenCalledWith(false, ['chrome', 'edge']);
 
-      expect(pathFinder.saveBookmarks).toHaveBeenCalledTimes(6);
+      // 意図: フェーズ1のダブルクリアが廃止されたため、各ブラウザへの書き込みは1回ずつ（計2回）です。
+      expect(pathFinder.saveBookmarks).toHaveBeenCalledTimes(2);
 
       let statusRes = await request(app).get('/api/save-status');
       expect(statusRes.status).toBe(200);
@@ -94,6 +96,9 @@ describe('API Integration Test (結合テスト)', () => {
 
       await jest.runAllTimersAsync();
 
+      // 意図: resume-sync で Sync Data がクリアされ、初回同期が強制されることを検証します。
+      expect(pathFinder.clearSyncData).toHaveBeenCalledWith('chrome');
+      expect(pathFinder.clearSyncData).toHaveBeenCalledWith('edge');
       expect(browserManager.restoreBrowserPreferences).toHaveBeenCalledWith(['chrome', 'edge']);
       expect(browserManager.cleanupBrowserPreferenceBackups).toHaveBeenCalledWith(['chrome', 'edge']);
 
